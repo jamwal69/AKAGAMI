@@ -1,0 +1,59 @@
+# Docker Compose for AKAGAMI Cybersecurity Toolkit
+version: '3.8'
+
+services:
+  akagami-backend:
+    build: .
+    container_name: akagami-backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend/logs:/app/backend/logs
+      - ./backend/reports:/app/backend/reports
+      - ./backend/uploads:/app/backend/uploads
+      - ./backend/data:/app/backend/data
+    environment:
+      - AKAGAMI_ENV=production
+      - PYTHONUNBUFFERED=1
+    networks:
+      - akagami-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  akagami-frontend:
+    build:
+      context: .
+      target: frontend-builder
+    container_name: akagami-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - akagami-backend
+    environment:
+      - REACT_APP_API_URL=http://localhost:8001
+    networks:
+      - akagami-network
+    restart: unless-stopped
+
+  # Optional: Redis for caching scan results
+  redis:
+    image: redis:7-alpine
+    container_name: akagami-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - akagami-network
+    restart: unless-stopped
+
+networks:
+  akagami-network:
+    driver: bridge
+
+volumes:
+  redis-data:

@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚔️ AKAGAMI - Red Theme</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a0000 100%);
+            color: #ff3333;
+            font-family: 'Courier New', monospace;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0;
+        }
+
+        .header {
+            text-align: center;
+            padding: 30px 20px;
+            background: linear-gradient(135deg, #200000 0%, #400000 100%);
+            border-bottom: 3px solid #ff3333;
+            box-shadow: 0 5px 20px rgba(255, 51, 51, 0.5);
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            color: #ff3333;
+            font-weight: bold;
+        }
+
+        .header p {
+            font-size: 1.3rem;
+            opacity: 0.9;
+            color: #ff6666;
+        }
+
+        /* Tab Navigation */
+        .tab-nav {
+            background: #1a0000;
+            border-bottom: 2px solid #ff3333;
+            padding: 0 20px;
+            display: flex;
+            overflow-x: auto;
+        }
+
+        .tab-button {
+            background: transparent;
+            border: none;
+            color: #ff6666;
+            padding: 15px 25px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 1rem;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            position: relative;
+        }
+
+        .tab-button:hover {
+            color: #ff3333;
+            background: rgba(255, 51, 51, 0.1);
+        }
+
+        .tab-button.active {
+            color: #ff3333;
+            border-bottom-color: #ff3333;
+            background: rgba(255, 51, 51, 0.2);
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px 20px;
+            min-height: calc(100vh - 200px);
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Junior Pentest Content */
+        .category-section {
+            margin-bottom: 40px;
+        }
+
+        .category-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: linear-gradient(135deg, #200000 0%, #300000 100%);
+            border-left: 4px solid #ff3333;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .category-icon {
+            font-size: 2rem;
+            margin-right: 15px;
+            color: #ff3333;
+        }
+
+        .category-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #ff3333;
+        }
+
+        .modules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .module-card {
+            background: linear-gradient(135deg, #200000 0%, #2d0000 100%);
+            border: 2px solid #ff3333;
+            border-radius: 12px;
+            padding: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .module-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 40px rgba(255, 51, 51, 0.6);
+            border: 2px solid #ff0000;
+            background: linear-gradient(135deg, #300000 0%, #400000 100%);
+        }
+
+        .module-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 51, 51, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .module-card:hover::before {
+            left: 100%;
+        }
+
+        .module-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .module-icon {
+            font-size: 2.2rem;
+            margin-right: 15px;
+            color: #ff3333;
+        }
+
+        .module-title {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #ff3333;
+        }
+
+        .module-description {
+            color: #ff9999;
+            margin-bottom: 15px;
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
+        .module-category {
+            display: inline-block;
+            background: rgba(255, 51, 51, 0.3);
+            color: #ff3333;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            border: 1px solid #ff3333;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        /* Scan Dialog */
+        .scan-dialog {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .scan-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #200000 0%, #300000 100%);
+            padding: 35px;
+            border-radius: 15px;
+            border: 3px solid #ff3333;
+            min-width: 550px;
+            max-width: 85%;
+            box-shadow: 0 20px 60px rgba(255, 51, 51, 0.5);
+        }
+
+        .scan-title {
+            color: #ff3333;
+            font-size: 1.6rem;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            color: #ff3333;
+            margin-bottom: 8px;
+            font-weight: bold;
+            font-size: 1rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            background: #0a0a0a;
+            border: 2px solid #ff3333;
+            border-radius: 8px;
+            color: #ff3333;
+            font-family: 'Courier New', monospace;
+            font-size: 1rem;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #ff0000;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 25px;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #ff3333 0%, #cc0000 100%);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            transition: all 0.3s ease;
+            font-size: 1rem;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            background: linear-gradient(135deg, #cc0000 0%, #990000 100%);
+            transform: translateY(-3px);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #666 0%, #333 100%);
+            color: #ff3333;
+        }
+
+        .btn-secondary:hover {
+            background: linear-gradient(135deg, #777 0%, #444 100%);
+        }
+
+        .results {
+            margin-top: 25px;
+            padding: 20px;
+            background: #0a0a0a;
+            border: 2px solid #ff3333;
+            border-radius: 8px;
+            max-height: 350px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .loading {
+            text-align: center;
+            color: #ff3333;
+            margin: 25px 0;
+            font-size: 1.1rem;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 25px;
+            height: 25px;
+            border: 3px solid #661111;
+            border-radius: 50%;
+            border-top-color: #ff3333;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .status-bar {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(255, 51, 51, 0.2);
+            border: 2px solid #ff3333;
+            border-radius: 10px;
+            padding: 12px 20px;
+            color: #ff3333;
+            backdrop-filter: blur(10px);
+        }
+
+        /* Coming Soon Tab */
+        .coming-soon {
+            text-align: center;
+            padding: 100px 20px;
+            color: #ff6666;
+        }
+
+        .coming-soon h2 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #ff3333;
+        }
+
+        .coming-soon p {
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>⚔️ AKAGAMI</h1>
+            <p>Advanced Cybersecurity Penetration Testing Toolkit</p>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-nav">
+            <button class="tab-button active" onclick="switchTab('junior-pentest')">
+                🔍 Junior Pentest
+            </button>
+            <button class="tab-button" onclick="switchTab('network-scan')">
+                🌐 Network Scanning
+            </button>
+            <button class="tab-button" onclick="switchTab('crypto-analysis')">
+                🔐 Crypto Analysis
+            </button>
+            <button class="tab-button" onclick="switchTab('forensics')">
+                🕵️ Digital Forensics
+            </button>
+            <button class="tab-button" onclick="switchTab('social-eng')">
+                👥 Social Engineering
+            </button>
+            <button class="tab-button" onclick="switchTab('mobile-security')">
+                📱 Mobile Security
+            </button>
+        </div>
+
+        <!-- Tab Contents -->
+        
+        <!-- Junior Pentest Tab -->
+        <div class="tab-content active" id="junior-pentest">
+            
+            <!-- Reconnaissance Category -->
+            <div class="category-section">
+                <div class="category-header">
+                    <div class="category-icon">🔍</div>
+                    <div class="category-title">Reconnaissance</div>
+                </div>
+                <div class="modules-grid" id="reconModules"></div>
+            </div>
+
+            <!-- Vulnerability Detection Category -->
+            <div class="category-section">
+                <div class="category-header">
+                    <div class="category-icon">🚨</div>
+                    <div class="category-title">Vulnerability Detection</div>
+                </div>
+                <div class="modules-grid" id="vulnModules"></div>
+            </div>
+
+            <!-- Authentication Category -->
+            <div class="category-section">
+                <div class="category-header">
+                    <div class="category-icon">🔐</div>
+                    <div class="category-title">Authentication & Authorization</div>
+                </div>
+                <div class="modules-grid" id="authModules"></div>
+            </div>
+
+            <!-- Injection Category -->
+            <div class="category-section">
+                <div class="category-header">
+                    <div class="category-icon">💉</div>
+                    <div class="category-title">Injection Testing</div>
+                </div>
+                <div class="modules-grid" id="injectionModules"></div>
+            </div>
+
+            <!-- Logic Flaws Category -->
+            <div class="category-section">
+                <div class="category-header">
+                    <div class="category-icon">⚡</div>
+                    <div class="category-title">Logic Flaws</div>
+                </div>
+                <div class="modules-grid" id="logicModules"></div>
+            </div>
+        </div>
+
+        <!-- Other Tabs (Coming Soon) -->
+        <div class="tab-content" id="network-scan">
+            <div class="coming-soon">
+                <h2>🌐 Network Scanning</h2>
+                <p>Advanced network discovery and port scanning tools coming soon...</p>
+            </div>
+        </div>
+
+        <div class="tab-content" id="crypto-analysis">
+            <div class="coming-soon">
+                <h2>🔐 Cryptographic Analysis</h2>
+                <p>Hash cracking, encryption analysis, and cipher tools coming soon...</p>
+            </div>
+        </div>
+
+        <div class="tab-content" id="forensics">
+            <div class="coming-soon">
+                <h2>🕵️ Digital Forensics</h2>
+                <p>File analysis, metadata extraction, and recovery tools coming soon...</p>
+            </div>
+        </div>
+
+        <div class="tab-content" id="social-eng">
+            <div class="coming-soon">
+                <h2>👥 Social Engineering</h2>
+                <p>Phishing simulation and awareness training tools coming soon...</p>
+            </div>
+        </div>
+
+        <div class="tab-content" id="mobile-security">
+            <div class="coming-soon">
+                <h2>📱 Mobile Security</h2>
+                <p>Android and iOS security testing tools coming soon...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scan Dialog -->
+    <div class="scan-dialog" id="scanDialog">
+        <div class="scan-content">
+            <h3 class="scan-title" id="scanTitle">Security Scan</h3>
+            <div class="form-group">
+                <label class="form-label">🎯 Target URL:</label>
+                <input type="text" class="form-input" id="targetUrl" placeholder="https://example.com" value="https://gymstack.zenovia.tech/">
+            </div>
+            <div class="form-group">
+                <label class="form-label">⚙️ Advanced Options (JSON):</label>
+                <input type="text" class="form-input" id="scanOptions" placeholder='{"depth": 3, "threads": 5}'>
+            </div>
+            <div class="buttons">
+                <button class="btn" onclick="startScan()">🚀 Start Scan</button>
+                <button class="btn btn-secondary" onclick="closeScanDialog()">❌ Cancel</button>
+            </div>
+            <div id="scanResults" class="results" style="display: none;"></div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        Backend API: <span id="backendStatus">Connecting...</span>
+    </div>
+
+    <script>
+        let currentModule = null;
+        
+        // Module definitions organized by category
+        const moduleCategories = {
+            reconnaissance: [
+                {
+                    id: 'application_walker',
+                    name: 'Application Walker',
+                    description: 'Comprehensive web application reconnaissance and structure mapping',
+                    icon: '🕸️'
+                },
+                {
+                    id: 'subdomain_enum',
+                    name: 'Subdomain Enumeration',
+                    description: 'Intelligent subdomain discovery using DNS queries and wordlists',
+                    icon: '🌐'
+                },
+                {
+                    id: 'content_discovery',
+                    name: 'Content Discovery',
+                    description: 'Advanced directory and file enumeration scanner',
+                    icon: '📂'
+                }
+            ],
+            vulnerability: [
+                {
+                    id: 'xss_scanner',
+                    name: 'XSS Scanner',
+                    description: 'Cross-Site Scripting vulnerability detection and exploitation',
+                    icon: '🐛'
+                },
+                {
+                    id: 'sql_injection',
+                    name: 'SQL Injection Scanner',
+                    description: 'Advanced SQL injection detection and exploitation framework',
+                    icon: '🗄️'
+                },
+                {
+                    id: 'ssrf_detection',
+                    name: 'SSRF Detection',
+                    description: 'Server-Side Request Forgery vulnerability scanner',
+                    icon: '🔄'
+                }
+            ],
+            authentication: [
+                {
+                    id: 'auth_bypass',
+                    name: 'Authentication Bypass',
+                    description: 'Advanced authentication and authorization bypass testing',
+                    icon: '🔓'
+                },
+                {
+                    id: 'idor_detection',
+                    name: 'IDOR Detection',
+                    description: 'Insecure Direct Object Reference vulnerability scanner',
+                    icon: '🛡️'
+                }
+            ],
+            injection: [
+                {
+                    id: 'file_inclusion',
+                    name: 'File Inclusion Scanner',
+                    description: 'Local and Remote File Inclusion vulnerability detection',
+                    icon: '📁'
+                },
+                {
+                    id: 'command_injection',
+                    name: 'Command Injection Tester',
+                    description: 'OS command injection vulnerability scanner and exploiter',
+                    icon: '💻'
+                }
+            ],
+            logic: [
+                {
+                    id: 'race_conditions',
+                    name: 'Race Condition Tester',
+                    description: 'Advanced race condition vulnerability detection and exploitation',
+                    icon: '⚡'
+                }
+            ]
+        };
+
+        function switchTab(tabId) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabId).classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+        }
+
+        function loadModules() {
+            console.log('Loading modules...');
+            
+            // Load reconnaissance modules
+            const reconGrid = document.getElementById('reconModules');
+            if (!reconGrid) {
+                console.error('reconModules element not found!');
+                return;
+            }
+            
+            console.log('Loading reconnaissance modules:', moduleCategories.reconnaissance);
+            moduleCategories.reconnaissance.forEach(module => {
+                reconGrid.appendChild(createModuleCard(module));
+            });
+
+            // Load vulnerability modules
+            const vulnGrid = document.getElementById('vulnModules');
+            moduleCategories.vulnerability.forEach(module => {
+                vulnGrid.appendChild(createModuleCard(module));
+            });
+
+            // Load authentication modules
+            const authGrid = document.getElementById('authModules');
+            moduleCategories.authentication.forEach(module => {
+                authGrid.appendChild(createModuleCard(module));
+            });
+
+            // Load injection modules
+            const injectionGrid = document.getElementById('injectionModules');
+            moduleCategories.injection.forEach(module => {
+                injectionGrid.appendChild(createModuleCard(module));
+            });
+
+            // Load logic modules
+            const logicGrid = document.getElementById('logicModules');
+            moduleCategories.logic.forEach(module => {
+                logicGrid.appendChild(createModuleCard(module));
+            });
+            
+            console.log('Modules loaded successfully!');
+        }
+
+        function createModuleCard(module) {
+            const card = document.createElement('div');
+            card.className = 'module-card';
+            card.onclick = () => openScanDialog(module);
+            
+            card.innerHTML = `
+                <div class="module-header">
+                    <div class="module-icon">${module.icon}</div>
+                    <div class="module-title">${module.name}</div>
+                </div>
+                <div class="module-description">${module.description}</div>
+                <div class="module-category">Security Module</div>
+            `;
+            
+            return card;
+        }
+
+        function openScanDialog(module) {
+            currentModule = module;
+            document.getElementById('scanTitle').textContent = `${module.icon} ${module.name}`;
+            document.getElementById('scanDialog').style.display = 'block';
+            document.getElementById('targetUrl').focus();
+        }
+
+        function closeScanDialog() {
+            document.getElementById('scanDialog').style.display = 'none';
+            document.getElementById('scanResults').style.display = 'none';
+            document.getElementById('scanResults').innerHTML = '';
+            document.getElementById('scanOptions').value = '';
+        }
+
+        async function startScan() {
+            if (!currentModule) return;
+            
+            const url = document.getElementById('targetUrl').value;
+            const optionsStr = document.getElementById('scanOptions').value;
+            
+            if (!url) {
+                alert('Please enter a target URL');
+                return;
+            }
+            
+            let options = {};
+            if (optionsStr) {
+                try {
+                    options = JSON.parse(optionsStr);
+                } catch (e) {
+                    alert('Invalid JSON in options field');
+                    return;
+                }
+            }
+            
+            const resultsDiv = document.getElementById('scanResults');
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Scanning ${url} with ${currentModule.name}...
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`http://localhost:8001/api/junior-pentest/scan/${currentModule.id}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        target: url,
+                        options: options
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultsDiv.innerHTML = `
+                        <div style="color: #ff3333; margin-bottom: 15px; font-size: 1.1rem;">✅ Scan completed successfully!</div>
+                        <div><strong>Target:</strong> ${url}</div>
+                        <div><strong>Module:</strong> ${currentModule.name}</div>
+                        <div><strong>Results:</strong></div>
+                        <pre style="margin-top: 15px; white-space: pre-wrap; color: #ff9999;">${JSON.stringify(result.results, null, 2)}</pre>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div style="color: #ff6666;">❌ Scan failed!</div>
+                        <div><strong>Error:</strong> ${result.error || 'Unknown error'}</div>
+                    `;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div style="color: #ff6666;">❌ Connection error!</div>
+                    <div><strong>Error:</strong> ${error.message}</div>
+                `;
+            }
+        }
+
+        async function checkBackendStatus() {
+            try {
+                const response = await fetch('http://localhost:8001/api/junior-pentest/modules');
+                if (response.ok) {
+                    document.getElementById('backendStatus').textContent = '🟢 Online';
+                    document.getElementById('backendStatus').style.color = '#ff3333';
+                } else {
+                    throw new Error('Backend responded with error');
+                }
+            } catch (error) {
+                document.getElementById('backendStatus').textContent = '🔴 Offline';
+                document.getElementById('backendStatus').style.color = '#ff6666';
+            }
+        }
+
+        // Close dialog when clicking outside
+        document.getElementById('scanDialog').onclick = function(e) {
+            if (e.target === this) {
+                closeScanDialog();
+            }
+        };
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeScanDialog();
+            }
+        });
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing modules...');
+            loadModules();
+            checkBackendStatus();
+            setInterval(checkBackendStatus, 10000); // Check every 10 seconds
+        });
+
+        // Also initialize immediately in case DOMContentLoaded already fired
+        if (document.readyState === 'loading') {
+            // DOM is still loading
+        } else {
+            // DOM has already loaded
+            loadModules();
+            checkBackendStatus();
+            setInterval(checkBackendStatus, 10000);
+        }
+    </script>
+</body>
+</html>
