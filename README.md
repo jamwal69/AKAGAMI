@@ -38,109 +38,133 @@
 ## 📦 Installation
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- npm or yarn
-- Docker & Docker Compose (recommended)
+- **Docker & Docker Compose** (recommended for all platforms)
+- **Git** (to clone the repository)
+- **Python 3.8+** (for manual installation)
+- **Node.js 16+** (for manual installation)
 
-### Quick Setup
+### 🚀 Quick Setup (Recommended)
 
-#### Option 1: Docker (Recommended)
-```bash
-# Clone the repository
+#### Windows
+```cmd
+# 1. Clone the repository
 git clone https://github.com/yourusername/akagami.git
 cd akagami
 
-# Start with Docker Compose
-docker-compose up -d
+# 2. Run the Windows installer
+install-windows.bat
 
-# Access GUI at http://localhost:3000
-# Backend API at http://localhost:8001
-# CLI access: docker exec -it akagami-backend python backend/cli.py --help
+# 3. Quick start anytime
+start-windows.bat
+
+# 4. To stop services
+stop-windows.bat
 ```
 
-#### Option 2: Manual Installation
+#### Linux / macOS
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/yourusername/akagami.git
 cd akagami
 
-# Run the setup script
+# 2. Run the installer
+chmod +x install.sh
+./install.sh
+
+# 3. Quick start anytime
+./start.sh
+
+# 4. To stop services
+./stop.sh
+```
+
+### 🐳 Docker-Only Setup
+```bash
+# Clone and start with Docker Compose
+git clone https://github.com/yourusername/akagami.git
+cd akagami
+docker-compose up -d
+
+# Access at http://localhost:8001
+```
+
+### 🛠️ Manual Installation (Without Docker)
+```bash
+# Clone repository
+git clone https://github.com/yourusername/akagami.git
+cd akagami
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install Node.js dependencies (optional, for React frontend)
+cd frontend && npm install && cd ..
+
+# Run setup script
 python setup.py
 
-# Or manual installation
-pip install -r requirements.txt
-cd frontend && npm install && cd ..
+# Start backend
+cd backend && python main_simple.py
 ```
 
 ## 🖥️ Usage
 
-### Web Interface (GUI)
-```bash
-# Start the full application
-npm run dev
+### 🎮 Quick Start Scripts
 
-# Or start components separately
-npm run backend    # Start API server
-npm run frontend   # Start React app
+#### Windows Users
+- **Install**: Double-click `install-windows.bat`
+- **Start**: Double-click `start-windows.bat`  
+- **Stop**: Double-click `stop-windows.bat`
+
+#### Linux/macOS Users
+- **Install**: `./install.sh`
+- **Start**: `./start.sh`
+- **Stop**: `./stop.sh`
+
+### 🌐 Web Interface (GUI)
+```bash
+# After installation, access:
+# - GUI: file:///path/to/akagami/akagami-red-gui.html
+# - API: http://localhost:8001
+# - Docs: http://localhost:8001/docs
+
+# Or start with scripts:
+./start.sh          # Linux/macOS
+start-windows.bat   # Windows
 ```
 
-Access the web interface at `http://localhost:3000`
-
-### Command Line Interface (CLI)
+### 💻 Command Line Interface (CLI)
 ```bash
+# Using Docker (after installation):
+docker exec -it akagami-backend python backend/cli.py --help
+
+# Show all available commands and usage examples:
+docker exec -it akagami-backend python backend/cli.py cheats
+
+# List web security modules:
+docker exec -it akagami-backend python backend/cli.py web list-modules
+
+# Run specific scans:
+docker exec -it akagami-backend python backend/cli.py web app-walker https://example.com
+docker exec -it akagami-backend python backend/cli.py web vuln-scan -m xss https://example.com
+
+# Manual installation (without Docker):
 cd backend
-
-# Show help
-python cli.py --help
-
-# List available web security modules
-python cli.py web list-modules
-
-# Run application walking
+python cli.py cheats
 python cli.py web app-walker https://example.com
-
-# Run content discovery
-python cli.py web content-discovery https://example.com
-
-# Run subdomain enumeration
-python cli.py web subdomain-enum example.com
-
-# Run vulnerability scans
-python cli.py web vuln-scan https://example.com --module xss
-python cli.py web vuln-scan https://example.com --module sql-injection
-
-# Run all vulnerability scans
-python cli.py web vuln-scan https://example.com
-
-# Start the API server
-python cli.py server --host 0.0.0.0 --port 8000
-
-# Launch GUI
-python cli.py gui
 ```
 
-### API Usage
+### 📡 API Usage
 ```bash
-# Start the API server
-cd backend
-python main.py
-```
+# After installation, API is available at http://localhost:8001
+# Documentation: http://localhost:8001/docs
 
-API documentation available at `http://localhost:8000/docs`
+# Example API calls:
+curl http://localhost:8001/health
+curl http://localhost:8001/api/junior-pentest/modules
 
-#### Example API Calls
-```bash
-# Get available modules
-curl http://localhost:8000/api/junior-pentest/modules
-
-# Run application walking
-curl -X POST http://localhost:8000/api/junior-pentest/scan/app-walker \
-  -H "Content-Type: application/json" \
-  -d '{"target": "https://example.com"}'
-
-# Run XSS scan
-curl -X POST http://localhost:8000/api/junior-pentest/scan/xss \
+# Run scans via API:
+curl -X POST http://localhost:8001/api/junior-pentest/scan/app-walker \
   -H "Content-Type: application/json" \
   -d '{"target": "https://example.com"}'
 ```
@@ -149,45 +173,54 @@ curl -X POST http://localhost:8000/api/junior-pentest/scan/xss \
 
 ```
 akagami/
-├── 🐳 Docker Configuration
-│   ├── Dockerfile              # Multi-stage Docker build
-│   ├── docker-compose.yml      # Service orchestration
-│   ├── .dockerignore           # Docker build exclusions
-│   └── docker-setup.sh         # Automated Docker setup
+├── � Cross-Platform Scripts
+│   ├── install-windows.bat        # Windows installer
+│   ├── install.sh                 # Linux/macOS installer  
+│   ├── start-windows.bat          # Windows quick start
+│   ├── start.sh                   # Linux/macOS quick start
+│   ├── stop-windows.bat           # Windows stop services
+│   └── stop.sh                    # Linux/macOS stop services
+├── �🐳 Docker Configuration
+│   ├── Dockerfile                 # Multi-stage Docker build
+│   ├── docker-compose.yml         # Service orchestration
+│   ├── .dockerignore              # Docker build exclusions
+│   └── docker-setup.sh            # Advanced Docker setup
 ├── 🎮 GUI Interfaces  
-│   ├── akagami-red-gui.html    # Professional red-themed GUI
-│   ├── akagami-gui.html        # Alternative GUI interface
-│   └── simple-gui.html         # Basic testing interface
+│   ├── akagami-red-gui.html       # Professional red-themed GUI
+│   ├── akagami-gui.html           # Alternative GUI interface
+│   └── simple-gui.html            # Basic testing interface
 ├── ⚙️ Backend (Python FastAPI)
-│   ├── main.py                 # Full FastAPI application
-│   ├── main_simple.py          # Simplified API server
-│   ├── cli.py                  # Rich CLI interface with cheats
+│   ├── main.py                    # Full FastAPI application
+│   ├── main_simple.py             # Simplified API server
+│   ├── cli.py                     # Rich CLI interface with cheats
 │   ├── core/
-│   │   ├── config.py           # Configuration management
-│   │   └── database.py         # Database operations
+│   │   ├── config.py              # Configuration management
+│   │   └── database.py            # Database operations
 │   ├── routers/
-│   │   ├── auth.py             # Authentication endpoints
-│   │   └── junior_pentest.py   # Security testing endpoints
+│   │   ├── auth.py                # Authentication endpoints
+│   │   └── junior_pentest.py      # Security testing endpoints
 │   ├── modules/
-│   │   └── web_security.py     # Security testing modules
-│   ├── logs/                   # Application logs
-│   ├── reports/                # Scan reports
-│   ├── uploads/                # File uploads
-│   └── data/                   # Application data
+│   │   └── web_security.py        # Security testing modules
+│   ├── logs/                      # Application logs
+│   ├── reports/                   # Scan reports
+│   ├── uploads/                   # File uploads
+│   └── data/                      # Application data
 ├── 🌐 Frontend (React TypeScript)
-│   ├── package.json            # Node.js dependencies
-│   ├── tsconfig.json           # TypeScript configuration
-│   ├── public/                 # Static assets
-│   └── src/                    # React source code
+│   ├── package.json               # Node.js dependencies
+│   ├── tsconfig.json              # TypeScript configuration
+│   ├── public/                    # Static assets
+│   └── src/                       # React source code
 ├── 📄 Configuration
-│   ├── requirements.txt        # Python dependencies
-│   ├── package.json           # Node.js project config
-│   ├── setup.py               # Setup script
-│   ├── .gitignore             # Git exclusions
-│   └── README.md              # This file
-└── 🚀 Deployment
-    ├── docker-setup.sh        # Docker deployment script
-    └── .github/               # GitHub Actions (optional)
+│   ├── requirements.txt           # Python dependencies
+│   ├── package.json              # Node.js project config
+│   ├── setup.py                  # Setup script
+│   ├── .gitignore                # Git exclusions
+│   └── README.md                 # This file
+└── � Documentation
+    ├── LICENSE                   # MIT License
+    ├── CONTRIBUTING.md           # Contribution guidelines
+    ├── SECURITY.md               # Security policy
+    └── .github/                  # GitHub templates
 ```
 
 ## 🔧 Configuration
