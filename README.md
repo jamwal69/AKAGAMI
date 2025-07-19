@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-red)](https://www.python.org/downloads/)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-red)](https://github.com/yourusername/akagami)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-red)](https://github.com/jamwal69/AKAGAMI)
 
 **AKAGAMI** is a comprehensive, modular cybersecurity penetration testing toolkit designed for security professionals, researchers, and ethical hackers. Built with both CLI and GUI interfaces, it provides an organized approach to web application security testing.
 
@@ -48,8 +48,8 @@
 #### Windows
 ```cmd
 # 1. Clone the repository
-git clone https://github.com/yourusername/akagami.git
-cd akagami
+git clone https://github.com/jamwal69/AKAGAMI.git
+cd AKAGAMI
 
 # 2. Run the Windows installer
 install-windows.bat
@@ -64,8 +64,8 @@ stop-windows.bat
 #### Linux / macOS
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/akagami.git
-cd akagami
+git clone https://github.com/jamwal69/AKAGAMI.git
+cd AKAGAMI
 
 # 2. Run the installer
 chmod +x install.sh
@@ -81,8 +81,8 @@ chmod +x install.sh
 ### 🐳 Docker-Only Setup
 ```bash
 # Clone and start with Docker Compose
-git clone https://github.com/yourusername/akagami.git
-cd akagami
+git clone https://github.com/jamwal69/AKAGAMI.git
+cd AKAGAMI
 docker-compose up -d
 
 # Access at http://localhost:8001
@@ -91,8 +91,8 @@ docker-compose up -d
 ### 🛠️ Manual Installation (Without Docker)
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/akagami.git
-cd akagami
+git clone https://github.com/jamwal69/AKAGAMI.git
+cd AKAGAMI
 
 # Install Python dependencies
 pip install -r requirements.txt
@@ -313,19 +313,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## ⚠️ Disclaimer
 
 This tool is for educational and authorized testing purposes only. The developers are not responsible for any misuse or damage caused by this tool. Users must ensure they have proper authorization before testing any systems.
-
-## 🙏 Acknowledgments
-
-- Thanks to the cybersecurity community for various testing methodologies
-- Built with modern open-source technologies
-- Inspired by various security testing frameworks
-
-## 📞 Support
-
-For questions, issues, or contributions:
-- Create an issue on GitHub
-- Check the documentation
-- Review the CLI help: `python cli.py --help`
 
 ---
 
