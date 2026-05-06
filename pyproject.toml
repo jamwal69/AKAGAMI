@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "akagami"
+version = "2.0.0"
+description = "Akagami — Professional-grade multi-agent reconnaissance engine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Rohan"},
+]
+
+dependencies = [
+    "openai>=1.0.0",
+    "python-whois>=0.9.0",
+    "chromadb>=0.5.0",
+    "click>=8.1.0",
+    "pyyaml>=6.0",
+    "sqlite-utils>=3.35",
+    "rich>=13.0",
+    "tenacity>=8.2",
+    "python-dotenv>=1.0",
+    "jinja2>=3.1",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+akagami = "reconforge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["reconforge*"]

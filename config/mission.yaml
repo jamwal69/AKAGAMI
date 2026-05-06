@@ -1,0 +1,30 @@
+# ReconForge Mission Configuration
+# Edit this file to define your mission scope and permissions.
+
+mission:
+  target: "example.com"
+  mission_name: "Example Corp External Recon"
+
+scope:
+  out_of_scope:
+    - "mail.example.com"    # explicitly excluded
+
+permissions:
+  passive_osint: true
+  active_scanning: true    # operator must explicitly enable
+  subdomain_bruteforce: true
+  directory_fuzzing: false
+  vulnerability_scanning: false
+  operator_approved: false  # stage gate requires this = true
+
+opsec:
+  enabled: false
+  scan_timing: 3            # nmap T-level (1-5)
+  request_delay_min: 0
+  request_delay_max: 0
+  rotate_user_agents: false
+
+output:
+  report_path: "output/report.md"
+  intel_db_path: "output/missions.db"
+  log_level: "INFO"

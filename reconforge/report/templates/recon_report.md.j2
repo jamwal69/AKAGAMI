@@ -1,0 +1,238 @@
+# ReconForge — Reconnaissance Report
+
+## {{ mission_name or "Reconnaissance Assessment" }}
+
+**Target:** {{ target }}
+**Mission ID:** `{{ mission_id }}`
+**Generated:** {{ generated_at }}
+
+---
+
+## Risk Assessment
+
+{% if risk_score %}
+**Overall Risk: {{ risk_score.color }} {{ risk_score.rating }} ({{ risk_score.score }}/100)**
+
+| Severity | Count |
+|----------|-------|
+{% for sev in ['critical', 'high', 'medium', 'low'] %}
+{% set key = sev + '_vulns' %}
+{% if risk_score.breakdown.get(key, 0) > 0 %}
+| {{ sev | title }} | {{ risk_score.breakdown[key] }} |
+{% endif %}
+{% endfor %}
+{% if risk_score.breakdown.get('credentials', 0) > 0 %}
+| Credentials | {{ risk_score.breakdown.credentials }} |
+{% endif %}
+{% endif %}
+
+---
+
+## Executive Summary
+
+{{ executive_summary }}
+
+---
+
+## Attack Surface Overview
+
+| Metric | Value |
+|--------|-------|
+| Hosts Discovered | {{ summary.hosts_discovered }} |
+| Open Ports | {{ summary.open_ports }} |
+| Subdomains | {{ summary.subdomains }} |
+| Credentials Found | {{ summary.credentials_found }} |
+| Interesting Paths | {{ summary.interesting_paths }} |
+| OSINT Findings | {{ summary.osint_findings }} |
+
+{% if summary.vulnerabilities_by_severity %}
+### Vulnerabilities by Severity
+
+| Severity | Count |
+|----------|-------|
+{% for sev, count in summary.vulnerabilities_by_severity.items() %}
+| {{ sev | title }} | {{ count }} |
+{% endfor %}
+{% endif %}
+
+---
+
+## Hosts and Services
+
+{% if data.hosts %}
+| IP | Hostname | OS | Tags |
+|----|----------|----|----|
+{% for h in data.hosts %}
+| {{ h.ip }} | {{ h.hostname or '-' }} | {{ h.os_guess or '-' }} | {{ h.tags or '-' }} |
+{% endfor %}
+{% else %}
+No hosts discovered.
+{% endif %}
+
+{% if data.ports %}
+### Open Ports
+
+| Port | Protocol | State | Service | Version | Banner |
+|------|----------|-------|---------|---------|--------|
+{% for p in data.ports[:50] %}
+| {{ p.port }} | {{ p.protocol }} | {{ p.state or 'open' }} | {{ p.service or '-' }} | {{ p.version or '-' }} | {{ (p.banner or '-')[:40] }} |
+{% endfor %}
+{% if data.ports | length > 50 %}
+*... and {{ data.ports | length - 50 }} more ports*
+{% endif %}
+{% endif %}
+
+---
+
+## Subdomains
+
+{% if data.subdomains %}
+| Domain | IP | CNAME | HTTP Status | Technologies |
+|--------|----|-------|-------------|-------------|
+{% for s in data.subdomains %}
+| {{ s.domain }} | {{ s.ip or '-' }} | {{ s.cname or '-' }} | {{ s.http_status or '-' }} | {{ s.technologies or '-' }} |
+{% endfor %}
+{% else %}
+No subdomains discovered.
+{% endif %}
+
+---
+
+## Vulnerabilities
+
+{% if data.vulnerabilities %}
+
+{% if vuln_stats %}
+**Total:** {{ vuln_stats.total }} | **Exploitable:** {{ vuln_stats.exploitable }}
+{% if vuln_stats.most_affected_host %}| **Most Affected:** {{ vuln_stats.most_affected_host }}{% endif %}
+
+{% endif %}
+
+| Severity | Title | CVE | CVSS | Exploit | Evidence |
+|----------|-------|-----|------|---------|----------|
+{% for v in data.vulnerabilities | sort(attribute='severity') %}
+| {{ v.severity | upper }} | {{ v.title[:50] }} | {{ v.cve_id or '-' }} | {{ v.cvss_score or '-' }} | {{ '✅' if v.exploit_available else '❌' }} | {{ (v.evidence or '-')[:50] }} |
+{% endfor %}
+
+{% for v in data.vulnerabilities %}
+{% if v.severity in ('critical', 'high') %}
+### {{ v.severity | upper }}: {{ v.title }}
+
+{% if v.cve_id %}**CVE:** {{ v.cve_id }} | {% endif %}**CVSS:** {{ v.cvss_score or 'N/A' }} | **Exploit Available:** {{ '✅ Yes' if v.exploit_available else '❌ No' }}
+
+{{ v.description or 'No description provided.' }}
+
+{% if v.evidence %}
+**Evidence:**
+```
+{{ v.evidence[:500] }}
+```
+{% endif %}
+
+{% if v.remediation %}
+**Remediation:** {{ v.remediation }}
+{% endif %}
+
+{% if v.exploit_reference %}
+**References:** {{ v.exploit_reference }}
+{% endif %}
+
+---
+
+{% endif %}
+{% endfor %}
+
+{% else %}
+No vulnerabilities identified.
+{% endif %}
+
+---
+
+## Web Application Findings
+
+{% set interesting = [] %}
+{% for p in data.web_paths if p.interesting %}
+{% if interesting.append(p) %}{% endif %}
+{% endfor %}
+
+{% if interesting %}
+| URL | Status | Content Type | Reason |
+|-----|--------|-------------|--------|
+{% for p in interesting[:30] %}
+| {{ p.url[:60] }} | {{ p.status_code }} | {{ p.content_type or '-' }} | {{ p.reason or '-' }} |
+{% endfor %}
+{% else %}
+No interesting web paths discovered.
+{% endif %}
+
+---
+
+## OSINT Findings
+
+{% if data.osint_findings %}
+| Category | Value | Context | Confidence |
+|----------|-------|---------|------------|
+{% for f in data.osint_findings %}
+| {{ f.category }} | {{ (f.value or '-')[:40] }} | {{ (f.context or '-')[:60] }} | {{ '%.0f%%' | format(f.confidence * 100) }} |
+{% endfor %}
+{% else %}
+No OSINT findings recorded.
+{% endif %}
+
+---
+
+{% if data.credentials %}
+## Credentials & Secrets ⚠️
+
+| Service | Username | Source | Confidence |
+|---------|----------|-------|------------|
+{% for c in data.credentials %}
+| {{ c.service or '-' }} | {{ c.username or '[redacted]' }} | {{ c.source or '-' }} | {{ '%.0f%%' | format(c.confidence * 100) }} |
+{% endfor %}
+
+> ⚠️ **IMPORTANT:** All discovered credentials should be rotated immediately.
+{% endif %}
+
+---
+
+## Recommendations
+
+{% if recommendations %}
+{% for rec in recommendations %}
+### [{{ rec.priority }}] {{ rec.title }}
+
+{{ rec.description }}
+
+**Effort:** {{ rec.effort | title }}
+
+{% endfor %}
+{% else %}
+No specific recommendations generated.
+{% endif %}
+
+---
+
+{% if summary.missing_coverage %}
+## Coverage Gaps
+
+{% for gap in summary.missing_coverage %}
+- ⚠ {{ gap }}
+{% endfor %}
+{% endif %}
+
+---
+
+{% if timeline %}
+## Mission Timeline
+
+| Timestamp | Tool | Success |
+|-----------|------|---------|
+{% for action in timeline[:20] %}
+| {{ action.timestamp[:19] }} | {{ action.tool or '-' }} | {{ '✅' if action.success else '❌' }} |
+{% endfor %}
+{% endif %}
+
+---
+
+*Report generated by ReconForge v1.0.0*
+*Classification: CONFIDENTIAL — For authorized personnel only*

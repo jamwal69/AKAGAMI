@@ -1,0 +1,27 @@
+mission:
+  target: priceline.com
+  mission_name: "Priceline Bug Bounty Testing"
+
+scope:
+  in_scope:
+    - www.priceline.com
+    - www.getaroom.com
+    - priceline.com
+    - ir.bookingholdings.com
+    - flyiin.com
+    - cruises.priceline.com
+    - bookingholdings-coe.com
+    - press.priceline.com
+    - www.bookingholdings.com
+    - "*.priceline.com"
+  out_of_scope:
+    - "Penny Denial of Service"
+
+permissions:
+  active_scanning: true
+
+opsec:
+  enabled: true
+
+custom_headers:
+  X-Bug-Bounty: "reconforge-agent"

@@ -1,0 +1,353 @@
+# ReconForge Tool Definitions
+# Each tool defines its binary, params, and execution constraints.
+
+tools:
+  whois:
+    binary: whois
+    description: "WHOIS lookup for domain registration info"
+    opsec_risk: passive
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+    command_template: "whois {target}"
+    timeout: 30
+
+  crt_sh:
+    binary: curl
+    description: "Certificate Transparency log lookup via crt.sh"
+    opsec_risk: passive
+    target_fields: [domain]
+    allowed_params:
+      target: {type: string}
+      domain: {type: string, required: true}
+    command_template: "curl -s 'https://crt.sh/?q=%25.{domain}&output=json'"
+    timeout: 30
+
+  theharvester:
+    binary: theHarvester
+    description: "Email, subdomain, and employee harvesting from public sources"
+    opsec_risk: passive
+    target_fields: [domain]
+    allowed_params:
+      target: {type: string}
+      domain: {type: string, required: true}
+      source: {type: string, default: "all"}
+      limit: {type: int, default: 200}
+    command_template: "theHarvester -d {domain} -b {source} -l {limit}"
+    timeout: 120
+
+  nmap:
+    binary: nmap
+    description: "Network port scanner and service fingerprinter"
+    opsec_risk: medium
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      ports: {type: string, default: "1-65535"}
+      timing: {type: int, default: 3, opsec_override: 2}
+      flags: {type: list, default: ["-sV", "-sC", "--open", "-Pn"]}
+      output_file: {type: string, default: "-"}
+    command_template: "nmap {flags} -T{timing} -p {ports} {target} -oX {output_file}"
+    timeout: 600
+
+  amass:
+    binary: amass
+    description: "Subdomain enumeration — passive and active modes"
+    opsec_risk: passive
+    target_fields: [domain]
+    allowed_params:
+      mode: {type: string, choices: [passive, active], default: passive}
+      domain: {type: string, required: true}
+    command_template: "amass enum -{mode} -d {domain}"
+    timeout: 300
+
+  httpx:
+    binary: httpx
+    description: "HTTP probing, status codes, titles, tech detection"
+    opsec_risk: low
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      ports: {type: string, default: "80,443,8080,8443"}
+      json_output: {type: bool, default: true}
+    command_template: "httpx -u {target} -ports {ports} -json"
+    timeout: 300
+
+  ffuf:
+    binary: ffuf
+    description: "Web directory and file fuzzer"
+    opsec_risk: medium
+    target_fields: [url]
+    allowed_params:
+      url: {type: string, required: true}
+      wordlist: {type: string, default: "/usr/share/wordlists/dirb/common.txt"}
+      extensions: {type: string, default: ""}
+      rate_limit: {type: int, default: 0}
+    command_template: "ffuf -u {url}/FUZZ -w {wordlist} -e {extensions} -rate {rate_limit}"
+    timeout: 300
+
+  nuclei:
+    binary: nuclei
+    description: "Template-based vulnerability scanner"
+    opsec_risk: medium
+    target_fields: [url, target]
+    allowed_params:
+      target: {type: string, required: true}
+      url: {type: string, default: ""}
+      templates: {type: string, default: ""}
+      template_args: {type: list, default: []}
+      severity: {type: string, default: "critical,high"}
+      headers: {type: list, default: []}
+      output_json: {type: bool, default: true}
+    command_template: "nuclei -u {url} -severity {severity} {template_args} {headers} -jsonl"
+    timeout: 600
+
+  subfinder:
+    binary: subfinder
+    description: "Fast passive subdomain enumeration using multiple sources"
+    opsec_risk: passive
+    target_fields: [domain]
+    allowed_params:
+      domain: {type: string, required: true}
+      silent: {type: bool, default: true}
+    command_template: "subfinder -d {domain} -silent"
+    timeout: 120
+
+  katana:
+    binary: katana
+    description: "Web crawling and JavaScript endpoint discovery"
+    opsec_risk: low
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      depth: {type: int, default: 3}
+      js_crawl: {type: bool, default: true}
+    command_template: "katana -u {target} -d {depth} -jc -silent"
+    timeout: 300
+
+  gau:
+    binary: gau
+    description: "Fetch known URLs from Wayback Machine, Common Crawl, and OTX"
+    opsec_risk: passive
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+    command_template: "gau {target}"
+    timeout: 120
+
+  jwt_tool:
+    binary: jwt_tool
+    description: "JWT manipulation and weak secret cracking"
+    opsec_risk: low
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      token: {type: string, required: true}
+      mode: {type: string, choices: [pb], default: pb}
+    command_template: "jwt_tool {token} -M {mode}"
+    timeout: 120
+
+  graphql_cop:
+    binary: graphql-cop
+    description: "GraphQL security auditing tool"
+    opsec_risk: medium
+    target_fields: [url]
+    allowed_params:
+      target: {type: string, required: true}
+      url: {type: string, required: true}
+    command_template: "graphql-cop -t {url}"
+    timeout: 300
+
+  clairvoyance:
+    binary: clairvoyance
+    description: "GraphQL schema enumeration"
+    opsec_risk: medium
+    target_fields: [url]
+    allowed_params:
+      target: {type: string, required: true}
+      url: {type: string, required: true}
+    command_template: "clairvoyance {url}"
+    timeout: 300
+
+  arjun:
+    binary: arjun
+    description: "HTTP parameter discovery"
+    opsec_risk: medium
+    target_fields: [url]
+    allowed_params:
+      target: {type: string, required: true}
+      url: {type: string, required: true}
+      output_file: {type: string, default: "-"}
+    command_template: "arjun -u {url} -oJ {output_file}"
+    timeout: 300
+
+  corsy:
+    binary: corsy
+    description: "CORS misconfiguration scanner"
+    opsec_risk: low
+    target_fields: [url]
+    allowed_params:
+      target: {type: string, required: true}
+      url: {type: string, required: true}
+    command_template: "corsy -u {url}"
+    timeout: 120
+
+  ssrfmap:
+    binary: ssrfmap
+    description: "SSRF vulnerability testing"
+    opsec_risk: high
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      request_file: {type: string, default: "request.txt"}
+      parameter: {type: string, default: "url"}
+      module: {type: string, choices: [readfiles], default: "readfiles"}
+    command_template: "ssrfmap -r {request_file} -p {parameter} -m {module}"
+    timeout: 300
+
+  trufflehog:
+    binary: trufflehog
+    description: "Secret and credential scanning"
+    opsec_risk: low
+    target_fields: [scan_target, target]
+    allowed_params:
+      target: {type: string, required: true}
+      scan_target: {type: string, required: true}
+      only_verified: {type: bool, default: true}
+      json_output: {type: bool, default: true}
+    command_template: "trufflehog filesystem {scan_target} --only-verified --json"
+    timeout: 300
+
+  searchsploit:
+    binary: searchsploit
+    description: "Exploit-DB lookup"
+    opsec_risk: low
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+    command_template: "searchsploit {target}"
+    timeout: 60
+
+  masscan:
+    binary: masscan
+    description: "High-speed network port scanner"
+    opsec_risk: high
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      ports: {type: string, default: "1-65535"}
+      rate: {type: int, default: 1000}
+    command_template: "masscan {target} -p {ports} --rate {rate}"
+    timeout: 600
+
+  gobuster:
+    binary: gobuster
+    description: "Directory and DNS brute forcing"
+    opsec_risk: medium
+    target_fields: [url]
+    allowed_params:
+      url: {type: string, required: true}
+      wordlist: {type: string, default: "/usr/share/wordlists/dirb/common.txt"}
+    command_template: "gobuster dir -u {url} -w {wordlist}"
+    timeout: 300
+
+  wpscan:
+    binary: wpscan
+    description: "WordPress vulnerability scanner"
+    opsec_risk: medium
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+    command_template: "wpscan --url {target}"
+    timeout: 600
+
+  ai_redteam:
+    binary: ai_redteam
+    description: "AI application red-team checks"
+    opsec_risk: high
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      action: {type: string}
+      endpoint: {type: string}
+      url: {type: string}
+      method: {type: string}
+      body_template: {type: string}
+    command_template: "ai_redteam {target}"
+    timeout: 300
+
+  browser:
+    binary: browser
+    description: "Headless browser automation"
+    opsec_risk: high
+    target_fields: [login_url, url, target]
+    allowed_params:
+      target: {type: string, required: true}
+      action: {type: string}
+      login_url: {type: string}
+      url: {type: string}
+      username: {type: string}
+      password: {type: string}
+    command_template: "browser {target}"
+    timeout: 300
+
+  playwright_script:
+    binary: playwright_script
+    description: "Headless Playwright scripted browser automation"
+    opsec_risk: high
+    target_fields: [login_url, url, target]
+    allowed_params:
+      target: {type: string, required: true}
+      action: {type: string}
+      login_url: {type: string}
+      url: {type: string}
+      username: {type: string}
+      password: {type: string}
+    command_template: "playwright_script {target}"
+    timeout: 300
+
+  shodan:
+    binary: shodan
+    description: "Passive Shodan host lookup via MCP/API"
+    opsec_risk: passive
+    target_fields: [target, ip]
+    allowed_params:
+      target: {type: string, required: true}
+      ip: {type: string, default: ""}
+    command_template: "shodan {target}"
+    timeout: 30
+
+  shodan_search:
+    binary: shodan_search
+    description: "Passive Shodan search via MCP/API"
+    opsec_risk: passive
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      query: {type: string, required: true}
+      max_results: {type: int, default: 10}
+    command_template: "shodan_search {query}"
+    timeout: 30
+
+  github_code_search:
+    binary: github_code_search
+    description: "Passive GitHub code search via MCP/API"
+    opsec_risk: passive
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      query: {type: string, required: true}
+      max_results: {type: int, default: 10}
+    command_template: "github_code_search {query}"
+    timeout: 30
+
+  web_search:
+    binary: web_search
+    description: "Passive web search via MCP/API"
+    opsec_risk: passive
+    target_fields: [target]
+    allowed_params:
+      target: {type: string, required: true}
+      query: {type: string, required: true}
+    command_template: "web_search {query}"
+    timeout: 30
