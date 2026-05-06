@@ -43,3 +43,6 @@ htmlcov/
 
 # Logs
 *.log
+httpx_pd_binary
+*_binary
+*.bin
