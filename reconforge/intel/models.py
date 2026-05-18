@@ -188,8 +188,113 @@ class SecretFinding(IntelBase):
     host_id: Optional[str] = None
     file_path: str = ""
     secret_type: str = ""              # e.g., aws_key, stripe_key, password
-    secret_value: str = ""
+    secret_value: str = Field(default="", repr=False)
     is_verified: bool = False
+
+
+class ResponseFingerprint(IntelBase):
+    """Passive response identity used for endpoint clustering."""
+    endpoint_id: Optional[str] = None
+    status_code: Optional[int] = None
+    content_type: str = ""
+    response_size: Optional[int] = None
+    body_hash: str = ""
+    fingerprint: str = ""
+
+
+class AuthContext(IntelBase):
+    """Redacted authentication context for an observed HTTP surface."""
+    auth_required: str = "unknown"      # unknown / anonymous / authenticated
+    scheme: str = ""
+    identity_label: str = ""
+    role: Optional[str] = None
+    has_cookies: bool = False
+    has_bearer_token: bool = False
+    header_names: list[str] = Field(default_factory=list)
+    source: str = "manual"
+
+
+class HttpParameter(IntelBase):
+    """Parameter name metadata. Secret values are never stored."""
+    endpoint_id: Optional[str] = None
+    location: str = "query"             # path / query / body / header
+    name: str = ""
+    normalized_name: str = ""
+    categories: list[str] = Field(default_factory=list)
+    sensitive: bool = False
+    value_redacted: bool = True
+    source: str = "manual"
+
+
+class ApiOperation(IntelBase):
+    """OpenAPI/GraphQL/browser-derived operation metadata."""
+    endpoint_id: Optional[str] = None
+    operation_id: str = ""
+    method: str = "GET"
+    path: str = "/"
+    normalized_route: str = "/"
+    source: str = "manual"
+    summary: str = ""
+    tags: list[str] = Field(default_factory=list)
+    operation_type: str = ""            # query / mutation / REST / subscription
+    state_changing: bool = False
+
+
+class HttpRequestSample(IntelBase):
+    """A redacted observed HTTP request/response sample."""
+    endpoint_id: Optional[str] = None
+    method: str = "GET"
+    scheme: str = "https"
+    host: str = ""
+    port: Optional[int] = None
+    path: str = "/"
+    normalized_route: str = "/"
+    query_parameter_names: list[str] = Field(default_factory=list)
+    body_parameter_names: list[str] = Field(default_factory=list)
+    header_names: list[str] = Field(default_factory=list)
+    auth_required: str = "unknown"
+    source: str = "manual"
+    status_code: Optional[int] = None
+    content_type: str = ""
+    response_size: Optional[int] = None
+    response_hash: str = ""
+    response_fingerprint: str = ""
+    discovered_at: datetime = Field(default_factory=_now)
+    state_changing: bool = False
+    interestingness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    interestingness_signals: list[str] = Field(default_factory=list)
+    sensitive_parameter_names: list[str] = Field(default_factory=list)
+    evidence: str = ""
+
+
+class HttpEndpoint(IntelBase):
+    """Canonical passive HTTP/API surface inventory record."""
+    method: str = "GET"
+    scheme: str = "https"
+    host: str = ""
+    port: Optional[int] = None
+    path: str = "/"
+    normalized_route: str = "/"
+    query_parameter_names: list[str] = Field(default_factory=list)
+    body_parameter_names: list[str] = Field(default_factory=list)
+    header_names: list[str] = Field(default_factory=list)
+    auth_required: str = "unknown"
+    source: str = "manual"
+    status_code: Optional[int] = None
+    content_type: str = ""
+    response_size: Optional[int] = None
+    response_hash: str = ""
+    response_fingerprint: str = ""
+    discovered_at: datetime = Field(default_factory=_now)
+    state_changing: bool = False
+    interestingness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    interestingness_signals: list[str] = Field(default_factory=list)
+    sensitive_parameter_names: list[str] = Field(default_factory=list)
+    recommended_manual_tests: list[str] = Field(default_factory=list)
+    false_positive_risk: str = "medium"
+    evidence: str = ""
+    raw_url: str = ""
+    auth_context_id: Optional[str] = None
 
 
 # ──────────────────────────────────────────────────────────────

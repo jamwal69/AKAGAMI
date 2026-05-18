@@ -14,8 +14,11 @@ import yaml
 
 from reconforge.intel.models import RawResult, ToolTimeoutError, ToolExecutionError
 from reconforge.utils.logger import get_logger, log_tool_call
+from reconforge.utils.sanitizer import collect_sensitive_values, redact_sensitive_output
 
 logger = get_logger("executor")
+
+HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 
 class ToolExecutor:
@@ -33,14 +36,15 @@ class ToolExecutor:
         return {}
 
     async def run(self, tool_name: str, params: dict,
-                  timeout: int = 300) -> RawResult:
+                  timeout: int = 300,
+                  audit_params: dict | None = None) -> RawResult:
         """
         Build command from tools.yaml + params, run via asyncio subprocess.
         Enforce timeout. Return structured RawResult.
         """
         cmd = self._build_command(tool_name, params)
-        log_tool_call(logger, tool_name, params)
-        logger.debug(f"Executing: {' '.join(cmd)}")
+        log_tool_call(logger, tool_name, audit_params if audit_params is not None else params)
+        logger.debug(f"Executing {tool_name} with {len(cmd)} argv entries")
 
         start = time.monotonic()
         try:
@@ -64,12 +68,18 @@ class ToolExecutor:
             duration = int((time.monotonic() - start) * 1000)
             stdout = stdout_bytes.decode("utf-8", errors="replace")
             stderr = stderr_bytes.decode("utf-8", errors="replace")
+            sensitive_values = collect_sensitive_values(params)
+            safe_stdout = redact_sensitive_output(stdout, sensitive_values)
+            safe_stderr = redact_sensitive_output(stderr, sensitive_values)
 
             if proc.returncode != 0:
-                logger.warning(f"{tool_name} exited with code {proc.returncode}: {stderr[:200]}")
+                logger.warning(
+                    f"{tool_name} exited with code {proc.returncode}: "
+                    f"{safe_stderr[:200]}"
+                )
 
             return RawResult(
-                stdout=stdout, stderr=stderr,
+                stdout=safe_stdout, stderr=safe_stderr,
                 exit_code=proc.returncode or 0, duration_ms=duration,
             )
         except FileNotFoundError:
@@ -165,7 +175,8 @@ class ToolExecutor:
             else:
                 continue
 
-            values[key] = self._validate_value(tool_name, key, value, config, tool_def)
+            values[key] = self._validate_value(
+                tool_name, key, value, config, tool_def)
         if "url" in allowed and not values.get("url") and values.get("target"):
             target = values["target"]
             values["url"] = target if str(target).startswith("http") else f"http://{target}"
@@ -199,13 +210,27 @@ class ToolExecutor:
                 raise ToolExecutionError(f"Parameter '{key}' for '{tool_name}' must be a list")
             for item in value:
                 self._reject_nul(tool_name, key, item)
+            choices = config.get("choices")
+            if choices:
+                invalid = [item for item in value if item not in choices]
+                if invalid:
+                    raise ToolExecutionError(
+                        f"Parameter '{key}' for '{tool_name}' contains unsupported list item(s): "
+                        f"{', '.join(str(item) for item in invalid)}"
+                    )
+        elif expected == "headers":
+            return self._validate_headers(tool_name, key, value)
+        elif expected == "rate_limit":
+            return self._validate_rate_limit(tool_name, key, value)
+        elif expected == "flag_string":
+            return self._validate_flag_string(tool_name, key, value, config)
         else:
             raise ToolExecutionError(
                 f"Unsupported parameter type '{expected}' for '{tool_name}.{key}'"
             )
 
         choices = config.get("choices")
-        if choices and value not in choices:
+        if choices and expected != "list" and value not in choices:
             raise ToolExecutionError(
                 f"Parameter '{key}' for '{tool_name}' must be one of {choices}"
             )
@@ -216,3 +241,63 @@ class ToolExecutor:
             raise ToolExecutionError(
                 f"Parameter '{key}' for '{tool_name}' contains a NUL byte"
             )
+
+    def _reject_crlf(self, tool_name: str, key: str, value) -> None:
+        text = str(value)
+        if "\r" in text or "\n" in text:
+            raise ToolExecutionError(
+                f"Parameter '{key}' for '{tool_name}' contains CRLF"
+            )
+
+    def _validate_headers(self, tool_name: str, key: str, value) -> list[str]:
+        if not isinstance(value, dict):
+            raise ToolExecutionError(
+                f"Parameter '{key}' for '{tool_name}' must be a header map"
+            )
+
+        args: list[str] = []
+        for raw_name, raw_value in value.items():
+            name = str(raw_name)
+            header_value = str(raw_value)
+            self._reject_nul(tool_name, key, name)
+            self._reject_nul(tool_name, key, header_value)
+            self._reject_crlf(tool_name, key, name)
+            self._reject_crlf(tool_name, key, header_value)
+            if not name or not HEADER_NAME_RE.fullmatch(name):
+                raise ToolExecutionError(
+                    f"Invalid header name for '{tool_name}': {name!r}"
+                )
+            args.extend(["-H", f"{name}: {header_value}"])
+        return args
+
+    def _validate_rate_limit(self, tool_name: str, key: str, value) -> list[str]:
+        if isinstance(value, bool):
+            raise ToolExecutionError(f"Parameter '{key}' for '{tool_name}' must be an int")
+        try:
+            rate = int(value)
+        except (TypeError, ValueError):
+            raise ToolExecutionError(f"Parameter '{key}' for '{tool_name}' must be an int")
+        if rate < 0:
+            raise ToolExecutionError(
+                f"Parameter '{key}' for '{tool_name}' must be non-negative"
+            )
+        return ["-rl", str(rate)] if rate > 0 else []
+
+    def _validate_flag_string(self, tool_name: str, key: str, value,
+                              config: dict) -> list[str]:
+        if not isinstance(value, str):
+            raise ToolExecutionError(f"Parameter '{key}' for '{tool_name}' must be a string")
+        self._reject_nul(tool_name, key, value)
+        self._reject_crlf(tool_name, key, value)
+        if not value:
+            return []
+        if value.startswith("-"):
+            raise ToolExecutionError(
+                f"Parameter '{key}' for '{tool_name}' must not start with '-'"
+            )
+        flag = config.get("flag")
+        if not flag:
+            raise ToolExecutionError(
+                f"Parameter '{key}' for '{tool_name}' is missing flag metadata"
+            )
+        return [str(flag), value]

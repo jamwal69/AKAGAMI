@@ -45,7 +45,7 @@ tools:
       target: {type: string, required: true}
       ports: {type: string, default: "1-65535"}
       timing: {type: int, default: 3, opsec_override: 2}
-      flags: {type: list, default: ["-sV", "-sC", "--open", "-Pn"]}
+      flags: {type: list, choices: ["-sV", "-sC", "--open", "-Pn", "--reason", "--script", "banner"], default: ["-sV", "-sC", "--open", "-Pn"]}
       output_file: {type: string, default: "-"}
     command_template: "nmap {flags} -T{timing} -p {ports} {target} -oX {output_file}"
     timeout: 600
@@ -70,7 +70,9 @@ tools:
       target: {type: string, required: true}
       ports: {type: string, default: "80,443,8080,8443"}
       json_output: {type: bool, default: true}
-    command_template: "httpx -u {target} -ports {ports} -json"
+      rate_limit: {type: rate_limit, default: 0}
+      headers: {type: headers, default: {}}
+    command_template: "httpx -u {target} -ports {ports} -json {rate_limit} {headers}"
     timeout: 300
 
   ffuf:
@@ -81,9 +83,10 @@ tools:
     allowed_params:
       url: {type: string, required: true}
       wordlist: {type: string, default: "/usr/share/wordlists/dirb/common.txt"}
-      extensions: {type: string, default: ""}
+      extensions: {type: flag_string, flag: "-e", default: ""}
       rate_limit: {type: int, default: 0}
-    command_template: "ffuf -u {url}/FUZZ -w {wordlist} -e {extensions} -rate {rate_limit}"
+      headers: {type: headers, default: {}}
+    command_template: "ffuf -u {url}/FUZZ -w {wordlist} {extensions} -rate {rate_limit} {headers} -json -noninteractive"
     timeout: 300
 
   nuclei:
@@ -94,12 +97,12 @@ tools:
     allowed_params:
       target: {type: string, required: true}
       url: {type: string, default: ""}
-      templates: {type: string, default: ""}
-      template_args: {type: list, default: []}
+      templates: {type: flag_string, flag: "-t", default: ""}
       severity: {type: string, default: "critical,high"}
-      headers: {type: list, default: []}
+      headers: {type: headers, default: {}}
+      rate_limit: {type: rate_limit, default: 0}
       output_json: {type: bool, default: true}
-    command_template: "nuclei -u {url} -severity {severity} {template_args} {headers} -jsonl"
+    command_template: "nuclei -u {url} -severity {severity} {templates} {headers} {rate_limit} -jsonl"
     timeout: 600
 
   subfinder:
@@ -225,7 +228,7 @@ tools:
     target_fields: [target]
     allowed_params:
       target: {type: string, required: true}
-    command_template: "searchsploit {target}"
+    command_template: "searchsploit -j {target}"
     timeout: 60
 
   masscan:

@@ -1,5 +1,5 @@
 """
-ffuf deterministic parser — reads ffuf JSON output (-of json flag).
+ffuf deterministic parser — reads ffuf JSON/JSONL output.
 Zero LLM. Instant. Deterministic.
 """
 import json
@@ -94,14 +94,40 @@ class FfufParser:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            logger.warning("FfufParser: could not parse JSON")
-            return []
+            return self._load_json_lines(raw)
 
+        return self._results_from_json_value(data)
+
+    def _load_json_lines(self, raw: str) -> list:
+        results = []
+        for line in raw.strip().splitlines():
+            line = line.strip()
+            if not line or not line.startswith(("{", "[")):
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            results.extend(self._results_from_json_value(data, warn=False))
+
+        if not results:
+            logger.warning("FfufParser: could not parse JSON")
+        return results
+
+    def _results_from_json_value(self, data, warn: bool = True) -> list:
         if isinstance(data, dict):
-            results = data.get("results", [])
-            return results if isinstance(results, list) else []
+            if "results" in data:
+                results = data.get("results", [])
+                return results if isinstance(results, list) else []
+            if self._looks_like_result(data):
+                return [data]
+            return []
         if isinstance(data, list):
             return data
 
-        logger.warning(f"FfufParser: unsupported JSON shape: {type(data).__name__}")
+        if warn:
+            logger.warning(f"FfufParser: unsupported JSON shape: {type(data).__name__}")
         return []
+
+    def _looks_like_result(self, item: dict) -> bool:
+        return any(key in item for key in ("url", "input", "status", "length"))

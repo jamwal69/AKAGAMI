@@ -36,6 +36,7 @@ from reconforge.orchestrator.event_bus import EventBus, Event
 from reconforge.report.generator import ReportGenerator
 from reconforge.skills.critic import CriticAgent
 from reconforge.skills.enricher import CveEnricher
+from reconforge.skills.scorer import SeverityScorer
 from reconforge.skills.chainer import AttackPathChainer
 from reconforge.memory.semantic import SemanticMemory
 
@@ -149,6 +150,7 @@ class MasterOrchestrator:
         self.critic = CriticAgent(router=self.router)
         self.summarizer = ContextSummarizer(router=self.router)
         self.enricher = CveEnricher(router=self.router, semantic=self.semantic)
+        self.scorer = SeverityScorer(router=self.router)
         self.report_gen = ReportGenerator(router=self.router)
 
         # Track retries for self-correction
@@ -266,6 +268,9 @@ class MasterOrchestrator:
 
         await self.event_bus.stop()
 
+        # Step 2.25: Build passive HTTP/API request inventory from stored URL evidence.
+        self._refresh_http_inventory()
+
         # Step 2.5: Evaluate Attack Paths from P4 findings
         logger.info("Evaluating findings for chained attack paths...")
         await self._evaluate_attack_paths()
@@ -277,12 +282,24 @@ class MasterOrchestrator:
             # Step 4: If gate passed, unlock exploit planner
             if gate_result.passed:
                 self.mission.stage_gate_passed = True
-                ExploitPlannerAgent.unlock()
-                logger.info("Stage gate PASSED — ExploitPlannerAgent unlocked")
+                if self._unlock_exploits_if_allowed(gate_result):
+                    logger.info("Stage gate PASSED — ExploitPlannerAgent unlocked")
+                else:
+                    logger.info(
+                        "Stage gate PASSED — awaiting operator approval before "
+                        "unlocking ExploitPlannerAgent"
+                    )
         else:
             # Create a mock gate result since it was bypassed
             from reconforge.intel.models import GateResult
-            gate_result = GateResult(passed=True, confidence=1.0, reason="Bypassed by BUG-BOUNTY mode high-confidence finding")
+            reason = (
+                "Bypassed by BUG-BOUNTY mode high-confidence finding"
+                if self.mission.mode == MissionMode.BUG_BOUNTY
+                else "Stage gate previously passed"
+            )
+            gate_result = GateResult(passed=True, confidence=1.0, reason=reason)
+            if self._unlock_exploits_if_allowed(gate_result):
+                logger.info("Stage gate already passed — ExploitPlannerAgent unlocked")
 
         # Step 5: Generate report — use workspace-aware path
         if self.mission.workspace_dir:
@@ -561,8 +578,9 @@ class MasterOrchestrator:
 
             # Critic reviews every result before storing
             reviewed = await self._critic_review(results)
+            reviewed = await self._post_process_reviewed_findings(reviewed)
 
-            # Store approved findings
+            # Store approved and quarantined findings.
             self.intel.store(reviewed)
             self.task_graph.mark_complete(task.id)
             self.memory.update_from_result(reviewed)
@@ -575,6 +593,10 @@ class MasterOrchestrator:
                     finding.model_dump(mode="json"),
                     self.mission.mission_id,
                     finding.confidence, finding.verified)
+
+                # Quarantined findings are retained but must not drive follow-on work.
+                if not finding.verified:
+                    continue
                 
                 # Emit events for Streaming DAG
                 if isinstance(finding, Subdomain):
@@ -804,11 +826,44 @@ class MasterOrchestrator:
                     approved.append(improved)
                 elif review.verdict == ReviewVerdict.QUARANTINE:
                     logger.warning(f"Finding quarantined: {review.reason}")
+                    finding_data = finding.model_dump()
+                    if review.improved_finding:
+                        finding_data.update(review.improved_finding)
+                    finding_data["verified"] = False
+                    approved.append(type(finding)(**finding_data))
                 else:
                     logger.debug(f"Finding rejected: {review.reason}")
         except Exception as e:
             logger.warning(f"Critic batch review failed; no findings approved: {e}")
         return approved
+
+    async def _post_process_reviewed_findings(
+        self,
+        findings: list[IntelBase],
+    ) -> list[IntelBase]:
+        processed = []
+        for finding in findings:
+            if not isinstance(finding, Vulnerability) or not finding.verified:
+                processed.append(finding)
+                continue
+
+            vuln = finding
+            enricher = getattr(self, "enricher", None)
+            if enricher:
+                try:
+                    vuln = await enricher.enrich(vuln)
+                except Exception as e:
+                    logger.warning(f"CVE enrichment failed for {vuln.id}: {e}")
+
+            scorer = getattr(self, "scorer", None)
+            if scorer:
+                try:
+                    vuln = await scorer.score(vuln, {})
+                except Exception as e:
+                    logger.warning(f"Severity scoring failed for {vuln.id}: {e}")
+
+            processed.append(vuln)
+        return processed
 
     # ── Memory management ────────────────────────────────────
 
@@ -823,16 +878,15 @@ class MasterOrchestrator:
     async def _evaluate_attack_paths(self) -> None:
         """Run AttackPathChainer on all current findings to deduce high-severity chains."""
         findings = []
-        for v in self.intel.vulnerabilities(self.mission.mission_id):
+        from reconforge.intel.models import OsintFinding, SecretFinding, WebPath
+        for v in self.intel._read_all(Vulnerability, self.mission.mission_id):
             findings.append(v)
-        for o in self.intel.osint_findings(self.mission.mission_id):
+        for o in self.intel._read_all(OsintFinding, self.mission.mission_id):
             findings.append(o)
-        from reconforge.intel.models import SecretFinding, WebPath
-        for s in self.intel._read_all(SecretFinding):
-            if s.mission_id == self.mission.mission_id:
-                findings.append(s)
-        for w in self.intel._read_all(WebPath):
-            if w.mission_id == self.mission.mission_id and w.interesting:
+        for s in self.intel._read_all(SecretFinding, self.mission.mission_id):
+            findings.append(s)
+        for w in self.intel._read_all(WebPath, self.mission.mission_id):
+            if w.interesting:
                 findings.append(w)
 
         vuln = await self.chainer.evaluate_chain(findings, self.mission.mission_id)
@@ -847,6 +901,37 @@ class MasterOrchestrator:
                 self.mission.stage_gate_passed = True
                 ExploitPlannerAgent.unlock()
                 await self._trigger_immediate_exploit(vuln)
+
+    def _refresh_http_inventory(self) -> None:
+        """Passively derive HTTP/API inventory from already-stored URL findings."""
+        try:
+            from reconforge.intel.http_inventory import refresh_http_inventory_from_store
+
+            stored = refresh_http_inventory_from_store(
+                self.intel,
+                self.mission.mission_id,
+                source_agent="orchestrator",
+                browser_events=self.memory.get("http_inventory_browser_events", []),
+                openapi_specs=self.memory.get("http_inventory_openapi_specs", []),
+                graphql_metadata=self.memory.get("http_inventory_graphql_metadata", []),
+            )
+            if stored:
+                logger.info(f"HTTP inventory refreshed: {len(stored)} endpoints")
+        except Exception as e:
+            logger.warning(f"HTTP inventory refresh failed: {e}")
+
+    def _operator_may_unlock_exploits(self, gate_result) -> bool:
+        if self.mission.mode == MissionMode.BUG_BOUNTY:
+            return True
+        if not getattr(gate_result, "requires_operator_approval", True):
+            return True
+        return bool(self.mission.operator_approved)
+
+    def _unlock_exploits_if_allowed(self, gate_result) -> bool:
+        if not self._operator_may_unlock_exploits(gate_result):
+            return False
+        ExploitPlannerAgent.unlock()
+        return True
 
     def cleanup(self) -> None:
         """Close database connections and ingest knowledge."""

@@ -1,4 +1,4 @@
-# ⚔️ Akagami V3 Bug Bounty Edition
+# ⚔️ Akagami V2 Bug Bounty Edition
 
 **Professional-grade, multi-agent reconnaissance and bug bounty engine. Free to run — no paid API subscriptions required.**
 
@@ -156,6 +156,9 @@ akagami workspaces
 
 # View intel store (company-aware)
 akagami intel -m <mission-id> -C <company> [-f table|json]
+
+# View high-signal HTTP/API endpoints (company-aware)
+akagami endpoints -m <mission-id> -C <company> [-l <limit>] [-f table|json]
 
 # Resume interrupted mission
 akagami resume -m <mission-id> -C <company>
@@ -324,7 +327,7 @@ GITHUB_TOKEN=...
 ## 🧪 Testing
 
 ```bash
-# Run all tests (202 tests)
+# Run all tests (365 tests)
 python -m pytest tests/ -v
 
 # Run by phase/component

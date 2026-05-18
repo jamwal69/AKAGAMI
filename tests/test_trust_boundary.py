@@ -303,3 +303,34 @@ def test_nuclei_failure_is_surfaced_not_silently_empty():
         pass
     else:
         raise AssertionError("ToolExecutionError was swallowed")
+
+
+def test_searchsploit_route_uses_json_output_and_parses_results():
+    agent = VulnAnalysisAgent.__new__(VulnAnalysisAgent)
+    agent.name = "vuln_agent"
+    agent.logger = MagicMock()
+    agent.tool_bus = MagicMock()
+    raw = (
+        '{"RESULTS_EXPLOIT": ['
+        '{"Title": "Apache Path Traversal", "EDB-ID": "12345", '
+        '"Path": "/usr/share/exploitdb/exploits/linux/remote/12345.py"}]}'
+    )
+    agent.tool_bus.call = AsyncMock(return_value=ToolResult(
+        tool="searchsploit", params={}, raw=raw, clean=raw, exit_code=0))
+    intel = MagicMock()
+    intel.ports.return_value = [{
+        "id": "port-80",
+        "host_id": "example.com",
+        "service": "apache",
+        "version": "2.4.49",
+    }]
+    mission = MissionState(scope=["example.com"], active_scan_permitted=True)
+
+    findings = run_async(agent._run_searchsploit("example.com", intel, mission))
+
+    assert len(findings) == 1
+    assert isinstance(findings[0], Vulnerability)
+    assert findings[0].source_tool == "searchsploit"
+    assert findings[0].exploit_available is True
+    params = agent.tool_bus.call.await_args.args[1]
+    assert params == {"target": "apache 2.4.49"}

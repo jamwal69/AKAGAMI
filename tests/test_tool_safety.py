@@ -9,6 +9,7 @@ from reconforge.intel.models import MissionState, OutOfScopeError, ToolExecution
 from reconforge.memory.episodic import EpisodicMemory
 from reconforge.tools.bus import ToolBus
 from reconforge.tools.executor import ToolExecutor
+from reconforge.utils.sanitizer import redact_sensitive_output
 
 
 def make_bus(tmp_path):
@@ -160,7 +161,7 @@ def test_whois_command_does_not_duplicate_target():
 def test_searchsploit_command_does_not_duplicate_executable_or_target():
     executor = ToolExecutor()
     assert executor._build_command("searchsploit", {"target": "apache"}) == [
-        "searchsploit", "apache"]
+        "searchsploit", "-j", "apache"]
 
 
 @pytest.mark.parametrize(
@@ -192,6 +193,11 @@ def test_searchsploit_command_does_not_duplicate_executable_or_target():
         ("nuclei",
          {"target": "example.com", "severity": "critical,high"},
          ["nuclei", "-u", "http://example.com", "-severity", "critical,high", "-jsonl"]),
+        ("ffuf",
+         {"url": "https://example.com"},
+         ["ffuf", "-u", "https://example.com/FUZZ", "-w",
+          "/usr/share/wordlists/dirb/common.txt", "-rate", "0",
+          "-json", "-noninteractive"]),
     ],
 )
 def test_migrated_tools_build_deterministic_argv(tool_name, params, expected):
@@ -249,6 +255,267 @@ def test_raw_argv_rejected_unless_registry_allows_it():
             "target": "example.com",
             "args": ["example.com"],
         })
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "params"),
+    [
+        ("httpx", {"target": "example.com", "headers": ["-o", "/tmp/out"]}),
+        ("nuclei", {"target": "example.com", "headers": ["-o", "/tmp/out"]}),
+        ("ffuf", {"url": "https://example.com", "headers": ["-o", "/tmp/out"]}),
+    ],
+)
+def test_header_argv_lists_are_rejected(tool_name, params):
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command(tool_name, params)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"X-Test\r\n-o": "safe"},
+        {"X-Test": "safe\r\n-o /tmp/out"},
+        {"": "safe"},
+        {"Bad Header": "safe"},
+    ],
+)
+def test_invalid_header_names_and_crlf_are_rejected(headers):
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command("nuclei", {
+            "target": "example.com",
+            "headers": headers,
+        })
+
+
+def test_rate_args_are_not_accepted_as_free_form_argv():
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command("nuclei", {
+            "target": "example.com",
+            "rate_args": ["-o", "/tmp/out"],
+        })
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command("nuclei", {
+            "target": "example.com",
+            "rate_limit": ["-o", "/tmp/out"],
+        })
+
+
+def test_remaining_list_params_reject_unsupported_argv_items():
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command("nmap", {
+            "target": "example.com",
+            "flags": ["-sV", "-oX", "/tmp/out"],
+        })
+
+
+def test_nuclei_template_args_list_is_not_accepted():
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command("nuclei", {
+            "target": "example.com",
+            "template_args": ["-o", "/tmp/out"],
+        })
+
+
+def test_nuclei_templates_value_cannot_be_used_as_a_flag():
+    with pytest.raises(ToolExecutionError):
+        ToolExecutor()._build_command("nuclei", {
+            "target": "example.com",
+            "templates": "-o",
+        })
+
+
+def test_executor_debug_logs_do_not_include_raw_auth(monkeypatch):
+    import reconforge.tools.executor as executor_module
+
+    messages = []
+
+    class Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"ok", b""
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        return Proc()
+
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        executor_module.logger, "debug",
+        lambda message: messages.append(str(message)))
+
+    token = "jwt-log-token-7a8b9c"
+    cookie = "cookie-log-secret-8d9e0f"
+    asyncio.run(ToolExecutor().run(
+        "nuclei",
+        {
+            "target": "example.com",
+            "headers": {
+                "Authorization": f"Bearer {token}",
+                "Cookie": f"sid={cookie}",
+            },
+        },
+        audit_params={
+            "target": "example.com",
+            "headers": {
+                "Authorization": "[REDACTED]",
+                "Cookie": "[REDACTED]",
+            },
+        },
+    ))
+
+    combined = "\n".join(messages)
+    assert token not in combined
+    assert cookie not in combined
+
+
+def run_executor_with_stderr(monkeypatch, params, stderr):
+    import reconforge.tools.executor as executor_module
+
+    warnings = []
+
+    class Proc:
+        returncode = 2
+
+        async def communicate(self):
+            return b"", stderr.encode()
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        return Proc()
+
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        executor_module.logger, "warning",
+        lambda message: warnings.append(str(message)))
+
+    result = asyncio.run(ToolExecutor().run(
+        "nuclei",
+        params,
+        audit_params={"target": params["target"], "headers": "[REDACTED]"},
+    ))
+    return result, "\n".join(warnings)
+
+
+def test_executor_stderr_warning_redacts_authorization_header(monkeypatch):
+    token = "auth-warning-token-1234567890"
+    stderr = (
+        "template failed before retry\n"
+        f"Authorization: Bearer {token}\n"
+        f"debug token {token}\n"
+        "request aborted"
+    )
+    result, warnings = run_executor_with_stderr(
+        monkeypatch,
+        {
+            "target": "example.com",
+            "headers": {"Authorization": f"Bearer {token}"},
+        },
+        stderr,
+    )
+
+    assert token not in warnings
+    assert token not in result.stderr
+    assert "Authorization: Bearer [REDACTED_AUTH]" in warnings
+    assert "debug token [REDACTED_SECRET]" in result.stderr
+    assert "template failed before retry" in warnings
+    assert "request aborted" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        ("Authorization: Bearer abc123", "Authorization: Bearer [REDACTED_AUTH]"),
+        ("Authorization: Basic abc123", "Authorization: Basic [REDACTED_AUTH]"),
+        ("Authorization: opaque-token-value", "Authorization: [REDACTED_AUTH]"),
+        ("Authorization: ", "Authorization: [REDACTED_AUTH]"),
+    ],
+)
+def test_authorization_header_redaction_formats(stderr, expected):
+    assert redact_sensitive_output(stderr) == expected
+
+
+def test_executor_stderr_warning_redacts_schemeless_authorization_header(monkeypatch):
+    token = "opaque-token-value-1234567890"
+    stderr = (
+        "template failed before retry\n"
+        f"Authorization: {token}\n"
+        "request aborted"
+    )
+    result, warnings = run_executor_with_stderr(
+        monkeypatch,
+        {"target": "example.com", "headers": {"X-Trace": "debug-context"}},
+        stderr,
+    )
+
+    assert token not in warnings
+    assert token not in result.stderr
+    assert "Authorization: [REDACTED_AUTH]" in warnings
+    assert "template failed before retry" in warnings
+    assert "request aborted" in result.stderr
+
+
+def test_executor_stderr_warning_redacts_cookie_header(monkeypatch):
+    cookie_value = "cookie-warning-secret-1234567890"
+    cookie = f"sid={cookie_value}; theme=light"
+    stderr = (
+        "http replay failed\n"
+        f"Cookie: {cookie}\n"
+        f"cookie jar sid={cookie_value}\n"
+        "status=403"
+    )
+    result, warnings = run_executor_with_stderr(
+        monkeypatch,
+        {
+            "target": "example.com",
+            "headers": {"Cookie": cookie},
+        },
+        stderr,
+    )
+
+    assert cookie not in warnings
+    assert cookie not in result.stderr
+    assert cookie_value not in warnings
+    assert cookie_value not in result.stderr
+    assert "Cookie: [REDACTED_COOKIE]" in warnings
+    assert "cookie jar sid=[REDACTED_SECRET]" in result.stderr
+    assert "http replay failed" in warnings
+    assert "status=403" in result.stderr
+
+
+def test_executor_stderr_warning_redacts_jwt_token(monkeypatch):
+    jwt = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    )
+    stderr = f"jwt parse failed for {jwt}; retry disabled"
+    result, warnings = run_executor_with_stderr(
+        monkeypatch,
+        {
+            "target": "example.com",
+            "headers": {"Authorization": f"Bearer {jwt}"},
+        },
+        stderr,
+    )
+
+    assert jwt not in warnings
+    assert jwt not in result.stderr
+    assert "[REDACTED_JWT]" in warnings
+    assert "jwt parse failed" in warnings
+    assert "retry disabled" in result.stderr
+
+
+def test_executor_stderr_warning_preserves_non_sensitive_text(monkeypatch):
+    stderr = "template parse failed at line 12: missing matcher"
+    result, warnings = run_executor_with_stderr(
+        monkeypatch,
+        {"target": "example.com", "headers": {"X-Trace": "debug-context"}},
+        stderr,
+    )
+
+    assert stderr in warnings
+    assert result.stderr == stderr
 
 
 def test_shell_true_is_not_used(monkeypatch):

@@ -126,6 +126,7 @@ def cli(ctx):
         console.print("    [bold]recon[/bold]       Start a reconnaissance mission")
         console.print("    [bold]workspaces[/bold]  List all company workspaces")
         console.print("    [bold]intel[/bold]       View current intel store")
+        console.print("    [bold]endpoints[/bold]   View high-signal HTTP/API surfaces")
         console.print("    [bold]resume[/bold]      Resume an interrupted mission")
         console.print("    [bold]gate[/bold]        Evaluate stage gate readiness")
         console.print("    [bold]report[/bold]      Generate professional report")
@@ -284,6 +285,33 @@ def intel(mission_id, fmt, company):
         console.print_json(json.dumps(data, default=str))
     else:
         _display_intel_table(data)
+    store.close()
+
+
+# ── Endpoints Command ──────────────────────────────────────────────
+
+@cli.command()
+@click.option("--mission-id", "-m", required=True, help="Mission ID")
+@click.option("--company", "-C", default="", help="Company name to find workspace")
+@click.option("--limit", "-l", default=20, show_default=True, help="Maximum endpoints to show")
+@click.option("--format", "-f", "fmt", default="table", type=click.Choice(["table", "json"]))
+def endpoints(mission_id, company, limit, fmt):
+    """View high-signal passive HTTP/API surfaces."""
+    print_mini_banner()
+
+    db_path = "output/missions.db"
+    if company:
+        ws = init_workspace(company)
+        db_path = get_db_path(ws)
+
+    store = IntelStore(db_path)
+    rows = store.top_http_endpoints(mission_id, limit=limit)
+    if fmt == "json":
+        console.print_json(json.dumps(rows, default=str))
+    elif not rows:
+        console.print("  [dim]No HTTP/API inventory records found for this mission.[/dim]")
+    else:
+        _display_endpoint_table(rows)
     store.close()
 
 
@@ -489,6 +517,54 @@ def _display_intel_table(data: dict) -> None:
                 table.add_row(*row)
         console.print(table)
         console.print()
+
+
+def _display_endpoint_table(rows: list[dict]) -> None:
+    """Display high-signal HTTP/API surfaces."""
+    table = Table(
+        title="[bold red]High-Signal HTTP/API Surfaces[/bold red]",
+        box=box.ROUNDED,
+        border_style="red",
+    )
+    table.add_column("Score", justify="right", style="bold yellow")
+    table.add_column("Method", style="cyan")
+    table.add_column("Endpoint", style="bold")
+    table.add_column("Why Interesting", overflow="fold", max_width=42)
+    table.add_column("Manual Tests", overflow="fold", max_width=48)
+    table.add_column("Source", style="magenta")
+    table.add_column("Conf", justify="right")
+    table.add_column("FP Risk", style="red")
+
+    for row in rows:
+        signals = _json_cell(row.get("interestingness_signals"))[:4]
+        tests = _json_cell(row.get("recommended_manual_tests"))[:2]
+        host = row.get("host", "")
+        path = row.get("normalized_route") or row.get("path", "")
+        table.add_row(
+            f"{float(row.get('interestingness_score') or 0):.0f}",
+            row.get("method", ""),
+            f"{host}{path}",
+            "; ".join(signals),
+            "; ".join(tests),
+            row.get("source", ""),
+            f"{float(row.get('confidence') or 0):.0%}",
+            row.get("false_positive_risk", "medium"),
+        )
+    console.print(table)
+
+
+def _json_cell(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed]
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return [str(value)]
 
 @cli.command()
 def watcher():

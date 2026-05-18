@@ -9,7 +9,7 @@ import pytest
 
 from reconforge.intel.models import (
     Host, MissionState, OsintFinding, Port, ReviewVerdict,
-    Vulnerability, WebPath,
+    SecretFinding, Vulnerability, WebPath,
 )
 from reconforge.intel.store import IntelStore
 from reconforge.memory.semantic import SemanticMemory
@@ -261,6 +261,146 @@ class TestSemanticMemory:
         results = self.semantic.query("Apache 2.4.49 path traversal", "cve_database", n_results=1)
         assert len(results) >= 1
         assert results[0]["metadata"]["cve_id"] == "CVE-2021-41773"
+
+    def test_ingest_mission_findings_uses_typed_verified_store_rows(self):
+        tmpfile = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmpfile.close()
+        store = IntelStore(tmpfile.name)
+        mission_id = "semantic-ingest-test"
+        try:
+            vuln = Vulnerability(
+                source_agent="vuln",
+                source_tool="nuclei",
+                confidence=0.8,
+                mission_id=mission_id,
+                verified=True,
+                host_id="10.0.0.1",
+                title="SQL Injection",
+                severity="high",
+                evidence="confirmed by scanner",
+            )
+            osint = OsintFinding(
+                source_agent="osint",
+                source_tool="whois",
+                confidence=0.8,
+                mission_id=mission_id,
+                verified=True,
+                category="whois",
+                value="example.com",
+                context="Registrant Example Corp",
+            )
+            unverified = OsintFinding(
+                source_agent="osint",
+                source_tool="crt_sh",
+                confidence=0.7,
+                mission_id=mission_id,
+                category="cert",
+                value="dev.example.com",
+                context="certificate transparency",
+            )
+            store.store([vuln, osint, unverified])
+
+            count = self.semantic.ingest_mission_findings(store, mission_id)
+
+            assert count == 2
+            results = self.semantic.query(
+                "SQL Injection Example Corp",
+                "cross_mission_intel",
+                n_results=2,
+            )
+            assert len(results) >= 1
+        finally:
+            store.close()
+            os.unlink(tmpfile.name)
+
+    def test_secret_finding_ingest_redacts_secret_value(self):
+        tmpfile = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmpfile.close()
+        store = IntelStore(tmpfile.name)
+        mission_id = "semantic-secret-redaction-test"
+        raw_secret = "rf-test-secret-value-6c8f5a2b"
+        raw_output_secret = "raw-output-secret-1b9f3d4e"
+        captured = {}
+
+        def capture_documents(collection, documents, metadatas, ids):
+            captured["collection"] = collection
+            captured["documents"] = documents
+            captured["metadatas"] = metadatas
+            captured["ids"] = ids
+            return len(documents)
+
+        try:
+            secret = SecretFinding(
+                source_agent="js_agent",
+                source_tool="trufflehog",
+                confidence=0.91,
+                mission_id=mission_id,
+                verified=True,
+                raw_output=f"matched secret {raw_output_secret}",
+                host_id="app.example.com",
+                file_path="static/app.js",
+                secret_type="stripe_key",
+                secret_value=raw_secret,
+                is_verified=True,
+            )
+            store.store([secret])
+            self.semantic._initialized = True
+            self.semantic.add_documents = capture_documents
+
+            count = self.semantic.ingest_mission_findings(store, mission_id)
+
+            assert count == 1
+            document = captured["documents"][0]
+            assert raw_secret not in document
+            assert raw_output_secret not in document
+            assert "secret_value" not in document
+            assert "raw_output" not in document
+            assert "stripe_key" in document
+            assert "static/app.js" in document
+            assert captured["metadatas"][0]["type"] == "SecretFinding"
+        finally:
+            store.close()
+            os.unlink(tmpfile.name)
+
+    def test_vulnerability_ingest_excludes_raw_output(self):
+        tmpfile = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmpfile.close()
+        store = IntelStore(tmpfile.name)
+        mission_id = "semantic-vuln-redaction-test"
+        raw_token = "semantic-jwt-token-2d5b7c"
+        captured = {}
+
+        def capture_documents(collection, documents, metadatas, ids):
+            captured["documents"] = documents
+            return len(documents)
+
+        try:
+            vuln = Vulnerability(
+                source_agent="vuln",
+                source_tool="jwt_tool",
+                confidence=0.9,
+                mission_id=mission_id,
+                verified=True,
+                raw_output=f"jwt_tool echoed {raw_token}",
+                host_id="app.example.com",
+                title="JWT Vulnerability Detected",
+                severity="high",
+                evidence="Weak secret detected",
+            )
+            store.store([vuln])
+            self.semantic._initialized = True
+            self.semantic.add_documents = capture_documents
+
+            count = self.semantic.ingest_mission_findings(store, mission_id)
+
+            assert count == 1
+            document = captured["documents"][0]
+            assert raw_token not in document
+            assert "raw_output" not in document
+            assert "JWT Vulnerability Detected" in document
+        finally:
+            store.close()
+            os.unlink(tmpfile.name)
 
 
 # ── StageGate Tests ──────────────────────────────────────────

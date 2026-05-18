@@ -46,3 +46,11 @@ htmlcov/
 httpx_pd_binary
 *_binary
 *.bin
+
+# Reports and local scan artifacts
+reports/
+.cache/
+cache/
+trufflehog_*.json
+*.sarif
+gitleaks-report.*

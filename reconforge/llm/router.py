@@ -25,6 +25,10 @@ from reconforge.utils.logger import get_logger
 
 logger = get_logger("llm.router")
 
+DEFAULT_NIM_MODEL = "deepseek-ai/deepseek-v4-flash"
+DEFAULT_GROQ_FAST_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_REASONING_MODEL = "deepseek-r1-distill-llama-70b"
+
 # Maps task_type → (primary_provider, fallback_provider)
 ROUTING_TABLE: dict[str, tuple[str, str]] = {
     "mission_planning":      ("nim",  "groq"),
@@ -62,11 +66,11 @@ class LLMRouter:
 
     def _init_providers(self) -> None:
         nim_key = os.getenv("NVIDIA_NIM_API_KEY", "")
-        nim_model = os.getenv("NVIDIA_NIM_MODEL", "deepseek-ai/deepseek-r1")
+        nim_model = os.getenv("NVIDIA_NIM_MODEL", DEFAULT_NIM_MODEL)
         groq_key = os.getenv("GROQ_API_KEY", "")
-        groq_model_fast = os.getenv("GROQ_MODEL_FAST", "llama-3.3-70b-versatile")
+        groq_model_fast = os.getenv("GROQ_MODEL_FAST", DEFAULT_GROQ_FAST_MODEL)
         groq_model_reasoning = os.getenv("GROQ_MODEL_REASONING",
-                                         "deepseek-r1-distill-llama-70b")
+                                         DEFAULT_GROQ_REASONING_MODEL)
 
         if nim_key:
             self._nim = NvidiaProvider(api_key=nim_key, model=nim_model)
@@ -124,6 +128,8 @@ class LLMRouter:
         return {
             "nim_available": self._nim is not None,
             "groq_available": self._groq is not None,
-            "nim_model": os.getenv("NVIDIA_NIM_MODEL", "not set"),
-            "groq_model_fast": os.getenv("GROQ_MODEL_FAST", "not set"),
+            "nim_model": self._nim.model if self._nim else os.getenv(
+                "NVIDIA_NIM_MODEL", "not set"),
+            "groq_model_fast": self._groq.model_fast if self._groq else os.getenv(
+                "GROQ_MODEL_FAST", "not set"),
         }

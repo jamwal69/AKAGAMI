@@ -2,7 +2,7 @@
 ReconForge Report Generator — Professional Markdown pentest report.
 
 Generates a comprehensive report with:
-- Claude-powered executive summary narrative
+- Provider-agnostic LLMRouter executive summary narrative
 - Structured Jinja2 template for findings
 - Risk scoring and prioritized remediation
 - Attack surface visualization data
@@ -13,8 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from reconforge.llm.router import LLMRouter
-from typing import Optional
 from jinja2 import Environment, FileSystemLoader
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -57,9 +55,11 @@ class ReportGenerator:
     """Generates professional Markdown pentest reports from intel store."""
 
     def __init__(self, template_dir: str = "reconforge/report/templates",
-                 router: Optional[LLMRouter] = None, client=None) -> None:
+                 router=None, client=None) -> None:
         self.template_dir = Path(template_dir)
-        self.client = client
+        self.router = router
+        # TODO: Remove deprecated client parameter after legacy callers migrate to router.
+        _ = client
         self.env = None
         if self.template_dir.exists():
             self.env = Environment(
@@ -81,7 +81,7 @@ class ReportGenerator:
         data = intel.export_json(mission_id)
         summary = intel.get_attack_surface_summary(mission_id)
 
-        # Generate Claude-powered sections
+        # Generate router-powered sections
         exec_summary = await self._generate_executive_summary(
             data, summary, target, mission_name)
         recommendations = await self._generate_recommendations(data, summary)
@@ -129,13 +129,13 @@ class ReportGenerator:
         logger.info(f"Report generated: {output_path} ({len(report)} chars)")
         return report
 
-    # ── Claude-powered sections ──────────────────────────────
+    # ── Router-powered sections ──────────────────────────────
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=10))
     async def _generate_executive_summary(self, data: dict, summary: dict,
                                           target: str, mission_name: str) -> str:
-        """Generate executive summary using Claude."""
-        if not self.client:
+        """Generate executive summary using LLMRouter."""
+        if not self.router:
             return self._fallback_exec_summary(summary, target)
 
         try:
@@ -148,11 +148,12 @@ class ReportGenerator:
                 f"Critical vulns: {summary.get('vulnerabilities_by_severity', {}).get('critical', 0)}\n"
                 f"Credentials found: {summary.get('credentials_found', 0)}\n"
             )
-            response = self.client.messages.create(
-                model="claude-sonnet-4-20250514", max_tokens=512,
+            text = await self.router.call(
+                task_type="report_writing",
                 system=EXEC_SUMMARY_PROMPT,
-                messages=[{"role": "user", "content": prompt}])
-            return response.content[0].text.strip()
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=512)
+            return text.strip()
         except Exception as e:
             logger.warning(f"Exec summary generation failed: {e}")
             return self._fallback_exec_summary(summary, target)
@@ -160,8 +161,8 @@ class ReportGenerator:
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=10))
     async def _generate_recommendations(self, data: dict,
                                         summary: dict) -> list[dict]:
-        """Generate prioritized recommendations using Claude."""
-        if not self.client:
+        """Generate prioritized recommendations using LLMRouter."""
+        if not self.router:
             return self._fallback_recommendations(summary)
 
         try:
@@ -171,12 +172,13 @@ class ReportGenerator:
                 f"{json.dumps(data.get('vulnerabilities', [])[:10], indent=2, default=str)[:3000]}\n\n"
                 f"Missing coverage: {summary.get('missing_coverage', [])}"
             )
-            response = self.client.messages.create(
-                model="claude-sonnet-4-20250514", max_tokens=1024,
+            text = await self.router.call(
+                task_type="report_writing",
                 system=RECOMMENDATIONS_PROMPT,
-                messages=[{"role": "user", "content": prompt}])
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024)
 
-            text = response.content[0].text.strip()
+            text = text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             return json.loads(text)
@@ -254,7 +256,7 @@ class ReportGenerator:
     # ── Fallbacks ────────────────────────────────────────────
 
     def _fallback_exec_summary(self, summary: dict, target: str) -> str:
-        """Generate executive summary without Claude."""
+        """Generate executive summary without an LLM router."""
         vulns = summary.get("vulnerabilities_by_severity", {})
         critical = vulns.get("critical", 0)
         high = vulns.get("high", 0)
@@ -272,7 +274,7 @@ class ReportGenerator:
         )
 
     def _fallback_recommendations(self, summary: dict) -> list[dict]:
-        """Generate basic recommendations without Claude."""
+        """Generate basic recommendations without an LLM router."""
         recs = []
         vulns = summary.get("vulnerabilities_by_severity", {})
 
@@ -420,5 +422,5 @@ class ReportGenerator:
                 lines.append(f"- ⚠ {gap}")
             lines.append("")
 
-        lines.append(f"\n---\n*Report generated by ReconForge v0.1.0*\n")
+        lines.append(f"\n---\n*Report generated by ReconForge v2.0.0*\n")
         return "\n".join(lines)

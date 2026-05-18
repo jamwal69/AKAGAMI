@@ -192,6 +192,11 @@ FFUF_JSON = """{
   ]
 }"""
 
+FFUF_JSONL = (
+    '{"url":"http://10.0.0.1/admin","status":200,"length":5400}\n'
+    '{"url":"http://10.0.0.1/config.php","status":403,"length":512}\n'
+)
+
 class TestFfufParser:
     def test_parses_three_paths(self):
         results = FfufParser().parse(FFUF_JSON, MID, AGENT)
@@ -216,6 +221,12 @@ class TestFfufParser:
 
     def test_invalid_json_returns_empty(self):
         assert FfufParser().parse("not json", MID, AGENT) == []
+
+    def test_json_lines_stdout_records(self):
+        results = FfufParser().parse(FFUF_JSONL, MID, AGENT)
+        paths = [r for r in results if isinstance(r, WebPath)]
+        assert len(paths) == 2
+        assert {p.status_code for p in paths} == {200, 403}
 
 
 # ── TheHarvesterParser ────────────────────────────────────────
@@ -295,6 +306,17 @@ class TestLLMRouter:
         for task in groq_tasks:
             primary, _ = ROUTING_TABLE[task]
             assert primary == "groq", f"{task} should route to groq, got {primary}"
+
+    def test_nim_default_model_matches_documented_v4_flash(self, monkeypatch):
+        from reconforge.llm.router import DEFAULT_NIM_MODEL, LLMRouter
+
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-key")
+        monkeypatch.delenv("NVIDIA_NIM_MODEL", raising=False)
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+        router = LLMRouter()
+        assert router.status()["nim_model"] == DEFAULT_NIM_MODEL
+        assert DEFAULT_NIM_MODEL == "deepseek-ai/deepseek-v4-flash"
 
 
 # ── SeverityScorer lookup table ───────────────────────────────

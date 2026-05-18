@@ -102,6 +102,7 @@ class McpBridge:
     """
 
     def __init__(self, router: Optional[LLMRouter] = None, client=None) -> None:
+        self.router = router
         self.client = client
         self.stats = {"calls": 0, "mcp_calls": 0, "api_calls": 0, "failures": 0}
 
@@ -259,11 +260,13 @@ class McpBridge:
         Use Anthropic's built-in web search tool for OSINT enrichment.
         This uses Claude's tool_use with the web_search_20250305 connector.
         """
-        if not self.client:
+        if not self.supports_web_search():
             return ToolResult(
                 tool="web_search", params=params,
-                raw="", clean="[No Anthropic client for web search]",
-                exit_code=1, error="No client")
+                raw="",
+                clean="[web_search unavailable: requires a web-search-capable Anthropic client]",
+                exit_code=1,
+                error="web_search unavailable")
 
         query = params.get("query", "")
         if not query:
@@ -381,9 +384,12 @@ class McpBridge:
                               "shodan_exploits", "shodan_dns"])
         if os.environ.get("GITHUB_TOKEN"):
             available.extend(["github_code_search", "github_dork"])
-        if self.client:
+        if self.supports_web_search():
             available.append("web_search")
         return available
+
+    def supports_web_search(self) -> bool:
+        return bool(self.client and hasattr(self.client, "messages"))
 
     def get_stats(self) -> dict:
         return self.stats.copy()

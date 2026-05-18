@@ -1,7 +1,16 @@
 """Tests for IntelStore."""
 
+import json
+
 import pytest
-from reconforge.intel.models import Host, OsintFinding, Port, Subdomain
+from reconforge.intel.models import (
+    Host,
+    OsintFinding,
+    Port,
+    SecretFinding,
+    SessionContext,
+    Subdomain,
+)
 from reconforge.intel.store import IntelStore
 
 
@@ -65,3 +74,56 @@ class TestIntelStore:
         ]
         ids = intel_store.store(findings)
         assert len(ids) == 5
+
+    def test_session_context_can_be_stored_and_reconstructed(self, intel_store, mission):
+        session = SessionContext(
+            source_agent="browser",
+            source_tool="playwright",
+            confidence=0.8,
+            mission_id=mission.mission_id,
+            host_id="app.example.com",
+            cookies=[{"name": "session", "value": "[REDACTED]"}],
+            local_storage={"access_token": "[REDACTED]"},
+            session_storage={"theme": "[REDACTED]"},
+            jwt_tokens=[],
+            auth_headers={"Authorization": "[REDACTED]"},
+            username="tester",
+        )
+
+        ids = intel_store.store([session])
+        rows = intel_store.session_contexts(mission.mission_id)
+        models = intel_store._read_all(SessionContext, mission.mission_id)
+
+        assert ids == [session.id]
+        assert len(rows) == 1
+        assert json.loads(rows[0]["cookies"])[0]["value"] == "[REDACTED]"
+        assert len(models) == 1
+        assert models[0].cookies[0]["name"] == "session"
+        assert models[0].auth_headers["Authorization"] == "[REDACTED]"
+
+    def test_secret_finding_can_be_stored_without_log_secret_summary(self, intel_store, mission):
+        secret = SecretFinding(
+            source_agent="js_agent",
+            source_tool="trufflehog",
+            confidence=0.99,
+            mission_id=mission.mission_id,
+            host_id="app.example.com",
+            file_path="static/app.js",
+            secret_type="api_key",
+            secret_value="super-secret-token",
+            is_verified=True,
+        )
+
+        ids = intel_store.store([secret])
+        rows = intel_store.secret_findings(mission.mission_id)
+        models = intel_store._read_all(SecretFinding, mission.mission_id)
+        summary = intel_store._get_finding_summary(secret)
+
+        assert ids == [secret.id]
+        assert len(rows) == 1
+        assert rows[0]["secret_type"] == "api_key"
+        assert len(models) == 1
+        assert models[0].secret_value == "super-secret-token"
+        assert models[0].is_verified is True
+        assert "super-secret-token" not in summary
+        assert "super-secret-token" not in repr(secret)

@@ -5,7 +5,9 @@ Also performs correlation analysis across all findings.
 """
 
 import json
+import re
 from typing import Optional
+from urllib.parse import urlparse
 
 from reconforge.llm.router import LLMRouter
 
@@ -14,6 +16,7 @@ from reconforge.intel.models import (
     IntelBase, MissionState, Task, Vulnerability, Severity,
     OutOfScopeError, ToolExecutionError,
 )
+from reconforge.intel.http_inventory import redact_url_for_inventory
 from reconforge.intel.store import IntelStore
 from reconforge.memory.working import WorkingMemory
 from reconforge.tools.bus import ToolBus
@@ -76,33 +79,15 @@ class VulnAnalysisAgent(BaseAgent):
         """Run nuclei template-based vulnerability scanning."""
         try:
             url = target if target.startswith("http") else f"http://{target}"
-            headers = params.get("custom_headers", {})
-
-            # Inject SessionContext if available in memory.
-            session_ctxs = self.memory.get("SessionContext") or []
-            if session_ctxs:
-                self.logger.info(f"Injecting authenticated session context into nuclei scan for {target}")
-                ctx = session_ctxs[0]
-                if isinstance(ctx, dict):
-                    headers.update(ctx.get("auth_headers", {}))
-                else:
-                    headers.update(getattr(ctx, "auth_headers", {}))
-
-            header_args = []
-            for hdr_name, hdr_val in headers.items():
-                header_args.extend(["-H", f"{hdr_name}: {hdr_val}"])
-
-            template_args = []
-            templates = params.get("templates")
-            if templates:
-                template_args.extend(["-t", templates])
+            headers = dict(params.get("custom_headers", {}))
+            headers.update(self._runtime_auth_headers(target, mission))
 
             nuclei_params = {
                 "target": target,
                 "url": url,
+                "templates": str(params.get("templates", "")),
                 "severity": params.get("severity", "critical,high"),
-                "headers": header_args,
-                "template_args": template_args,
+                "headers": headers,
                 "output_json": True,
             }
 
@@ -304,7 +289,7 @@ class VulnAnalysisAgent(BaseAgent):
     async def _run_jwt_tool(self, target: str, params: dict, memory: WorkingMemory, mission: MissionState) -> list[IntelBase]:
         """Run jwt_tool on captured JWTs to check for weak secrets and alg confusion."""
         findings = []
-        session_ctxs = memory.get("SessionContext") or []
+        session_ctxs = self._runtime_auth_contexts(memory, mission)
         tokens = []
         for ctx in session_ctxs:
             if isinstance(ctx, dict):
@@ -324,9 +309,10 @@ class VulnAnalysisAgent(BaseAgent):
                     {"target": target, "token": token, "mode": "pb"},
                     mission
                 )
+                safe_raw = self._redact_supplied_tokens(result.raw, [token])
                 
                 # Simple regex parsing or let Claude parse if complex
-                if "Vulnerability found" in result.raw or "Weak secret" in result.raw:
+                if "Vulnerability found" in safe_raw or "Weak secret" in safe_raw:
                     finding = Vulnerability(
                         source_agent=self.name, source_tool="jwt_tool",
                         confidence=0.9, mission_id=mission.mission_id,
@@ -334,8 +320,8 @@ class VulnAnalysisAgent(BaseAgent):
                         title="JWT Vulnerability Detected",
                         description="jwt_tool identified a weakness in the captured token.",
                         severity="high",
-                        evidence=result.raw[:500],
-                        raw_output=result.raw[:1000]
+                        evidence=safe_raw[:500],
+                        raw_output=safe_raw[:1000]
                     )
                     findings.append(finding)
             except (OutOfScopeError, PermissionError, ToolExecutionError):
@@ -344,6 +330,13 @@ class VulnAnalysisAgent(BaseAgent):
                 self.logger.warning(f"jwt_tool failed for token: {e}")
                 
         return findings
+
+    def _redact_supplied_tokens(self, text: str, tokens: list[str]) -> str:
+        redacted = text or ""
+        for token in tokens:
+            if token:
+                redacted = redacted.replace(token, "[REDACTED_JWT]")
+        return redacted
 
     async def _run_graphql_tools(self, target: str, tool: str, params: dict, memory: WorkingMemory, mission: MissionState) -> list[IntelBase]:
         """Run graphql-cop or clairvoyance on discovered GraphQL endpoints."""
@@ -358,6 +351,7 @@ class VulnAnalysisAgent(BaseAgent):
                 {"target": target, "url": url},
                 mission
             )
+            self._remember_graphql_metadata(memory, url, result.raw)
             
             if tool == "graphql_cop":
                 if "HIGH" in result.raw or "CRITICAL" in result.raw:
@@ -391,3 +385,109 @@ class VulnAnalysisAgent(BaseAgent):
             self.logger.warning(f"{tool} failed against {url}: {e}")
             
         return findings
+
+    def _runtime_auth_headers(self, target: str, mission: MissionState) -> dict:
+        headers = {}
+        for ctx in self._runtime_auth_contexts(self.memory, mission):
+            if not self._auth_context_matches_target(ctx, target):
+                continue
+            if isinstance(ctx, dict):
+                headers.update(self._usable_headers(ctx.get("auth_headers", {})))
+                tokens = ctx.get("jwt_tokens", [])
+                cookie_header = self._cookie_header(ctx.get("cookies", []))
+            else:
+                headers.update(self._usable_headers(getattr(ctx, "auth_headers", {})))
+                tokens = getattr(ctx, "jwt_tokens", [])
+                cookie_header = self._cookie_header(getattr(ctx, "cookies", []))
+            if "Authorization" not in headers:
+                token = next((t for t in tokens if self._is_raw_secret(t)), "")
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+            if cookie_header:
+                headers["Cookie"] = cookie_header
+        return headers
+
+    def _runtime_auth_contexts(self, memory: WorkingMemory,
+                               mission: MissionState) -> list:
+        contexts = []
+        if hasattr(memory, "get_sensitive"):
+            contexts.extend(memory.get_sensitive("runtime_auth_contexts", []) or [])
+        contexts.extend(memory.get("SessionContext") or [])
+        return [
+            ctx for ctx in contexts
+            if not isinstance(ctx, dict)
+            or ctx.get("mission_id") in (None, mission.mission_id)
+        ]
+
+    def _auth_context_matches_target(self, ctx, target: str) -> bool:
+        ctx_host = ctx.get("host_id") if isinstance(ctx, dict) else getattr(ctx, "host_id", "")
+        if not ctx_host:
+            return True
+        target_host = self._hostname(target)
+        ctx_hostname = self._hostname(str(ctx_host))
+        return target_host == ctx_hostname or target_host.endswith(f".{ctx_hostname}")
+
+    def _hostname(self, value: str) -> str:
+        if not value:
+            return ""
+        parsed = urlparse(value if "://" in value else f"https://{value}")
+        return (parsed.hostname or value).split("/", 1)[0].lower()
+
+    def _usable_headers(self, headers: dict) -> dict:
+        return {
+            str(key): str(value)
+            for key, value in (headers or {}).items()
+            if self._is_raw_secret(value)
+        }
+
+    def _cookie_header(self, cookies: list[dict]) -> str:
+        pairs = []
+        for cookie in cookies or []:
+            name = cookie.get("name")
+            value = cookie.get("value")
+            if name and self._is_raw_secret(value):
+                pairs.append(f"{name}={value}")
+        return "; ".join(pairs)
+
+    def _is_raw_secret(self, value) -> bool:
+        text = str(value or "")
+        return bool(text and text != "[REDACTED]")
+
+    def _remember_graphql_metadata(self, memory: WorkingMemory, url: str,
+                                   raw_output: str) -> None:
+        """Store sanitized GraphQL operation names for passive inventory."""
+        metadata = list(memory.get("http_inventory_graphql_metadata", []))
+        item = {
+            "endpoint_url": redact_url_for_inventory(url),
+            "operations": self._graphql_operations_from_output(raw_output),
+        }
+        key = item["endpoint_url"].lower()
+        merged = {
+            str(existing.get("endpoint_url", "")).lower(): existing
+            for existing in metadata
+            if existing.get("endpoint_url")
+        }
+        merged[key] = item
+        memory.set("http_inventory_graphql_metadata", list(merged.values()))
+
+    def _graphql_operations_from_output(self, raw_output: str) -> list[dict]:
+        operations = []
+        schema = raw_output or ""
+        block_re = re.compile(
+            r"type\s+(Query|Mutation|Subscription)\s*\{(?P<body>.*?)\}",
+            re.IGNORECASE | re.DOTALL,
+        )
+        for match in block_re.finditer(schema):
+            op_type = match.group(1).lower()
+            for line in match.group("body").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                name_match = re.match(r"([_A-Za-z][_0-9A-Za-z]*)\s*(?:\(|:)", stripped)
+                if not name_match:
+                    continue
+                operations.append({
+                    "type": op_type,
+                    "name": name_match.group(1),
+                })
+        return operations[:100]

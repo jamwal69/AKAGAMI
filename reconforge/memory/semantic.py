@@ -257,16 +257,21 @@ class SemanticMemory:
         if not self._initialized:
             return 0
 
+        from reconforge.intel.models import (
+            OsintFinding,
+            SecretFinding,
+            Vulnerability,
+        )
+
         findings = []
-        for v in intel_store.vulnerabilities(mission_id):
+        for v in intel_store._read_all(Vulnerability, mission_id):
             if v.verified:
                 findings.append(v)
-        for o in intel_store.osint_findings(mission_id):
+        for o in intel_store._read_all(OsintFinding, mission_id):
             if o.verified:
                 findings.append(o)
-        from reconforge.intel.models import SecretFinding
-        for s in intel_store._read_all(SecretFinding):
-            if s.mission_id == mission_id and s.is_verified:
+        for s in intel_store._read_all(SecretFinding, mission_id):
+            if s.verified or s.is_verified:
                 findings.append(s)
 
         if not findings:
@@ -277,12 +282,42 @@ class SemanticMemory:
         ids = []
 
         for f in findings:
-            doc_str = json.dumps(f.model_dump(exclude={"id", "mission_id", "confidence"}), default=str)
+            doc_str = self._finding_to_semantic_document(f)
             documents.append(doc_str)
             metadatas.append({"mission_id": mission_id, "type": type(f).__name__})
             ids.append(f.id)
 
         return self.add_documents("cross_mission_intel", documents, metadatas, ids)
+
+    def _finding_to_semantic_document(self, finding) -> str:
+        """Serialize a finding for vector memory without indexing raw secrets."""
+        from reconforge.intel.models import SecretFinding
+
+        if isinstance(finding, SecretFinding):
+            safe_data = {
+                "type": "SecretFinding",
+                "source_agent": finding.source_agent,
+                "source_tool": finding.source_tool,
+                "host_id": finding.host_id,
+                "file_path": finding.file_path,
+                "secret_type": finding.secret_type,
+                "confidence": finding.confidence,
+                "verified": finding.verified,
+                "is_verified": finding.is_verified,
+            }
+            return json.dumps(
+                {key: value for key, value in safe_data.items()
+                 if value not in (None, "")},
+                default=str,
+            )
+
+        return json.dumps(
+            finding.model_dump(
+                exclude={"id", "mission_id", "confidence", "raw_output"},
+                mode="json",
+            ),
+            default=str,
+        )
 
     # ── Stats ────────────────────────────────────────────────
 

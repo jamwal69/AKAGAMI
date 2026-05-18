@@ -21,6 +21,7 @@ class WorkingMemory:
 
     def __init__(self) -> None:
         self._store: dict[str, Any] = {}
+        self._sensitive_store: dict[str, Any] = {}
         self._recent_results: list[dict] = []
         self._agent_contexts: dict[str, list[str]] = {}
         self._max_recent = 20
@@ -33,6 +34,16 @@ class WorkingMemory:
 
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
+
+    def set_sensitive(self, key: str, value: Any) -> None:
+        """Store runtime-only sensitive data excluded from prompts/summaries."""
+        self._sensitive_store[key] = value
+
+    def get_sensitive(self, key: str, default: Any = None) -> Any:
+        return self._sensitive_store.get(key, default)
+
+    def delete_sensitive(self, key: str) -> None:
+        self._sensitive_store.pop(key, None)
 
     def token_count(self) -> int:
         """Estimate current context size in tokens."""
@@ -98,5 +109,6 @@ class WorkingMemory:
 
     def clear(self) -> None:
         self._store.clear()
+        self._sensitive_store.clear()
         self._recent_results.clear()
         self._agent_contexts.clear()

@@ -3,6 +3,7 @@ ReconForge Tool Bus — Central dispatcher for all tool calls.
 Single point of control: scope check, permission check, opsec, sanitize, log.
 """
 
+import hashlib
 from typing import Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -78,8 +79,10 @@ class ToolBus:
         """
         self.check_safety(tool_name, params, mission)
 
+        audit_params = self._audit_params(params)
+
         # 3. Dedup check
-        cached = self.episodic.dedup_check(tool_name, params, mission.mission_id)
+        cached = self.episodic.dedup_check(tool_name, audit_params, mission.mission_id)
         if cached:
             logger.info(f"Using cached result for {tool_name}")
             return ToolResult(tool=tool_name, params=params, raw="[CACHED]",
@@ -98,7 +101,7 @@ class ToolBus:
                 logger.info(f"Routing {tool_name} through MCP bridge")
                 mcp_result = await self.mcp_bridge.call(tool_name, exec_params)
                 clean = self.sanitizer.clean(mcp_result.raw)
-                self.episodic.log_action(tool_name, params, clean,
+                self.episodic.log_action(tool_name, audit_params, clean,
                                          mission.mission_id,
                                          duration_ms=mcp_result.duration_ms)
                 return ToolResult(
@@ -109,10 +112,14 @@ class ToolBus:
             if tool_name in MCP_TOOLS:
                 raise ToolExecutionError(f"MCP bridge not configured for tool '{tool_name}'")
 
-            raw = await self.executor.run(tool_name, exec_params)
+            raw = await self.executor.run(
+                tool_name,
+                exec_params,
+                audit_params=self._audit_params(exec_params),
+            )
         except ToolExecutionError as e:
             logger.error(f"Tool execution failed: {e}")
-            self.episodic.log_action(tool_name, params, str(e),
+            self.episodic.log_action(tool_name, audit_params, str(e),
                                      mission.mission_id, success=False)
             raise
 
@@ -120,13 +127,63 @@ class ToolBus:
         clean = self.sanitizer.clean(raw.stdout)
 
         # 7. Log to episodic memory
-        self.episodic.log_action(tool_name, params, clean, mission.mission_id,
+        self.episodic.log_action(tool_name, audit_params, clean, mission.mission_id,
                                  duration_ms=raw.duration_ms)
 
         return ToolResult(tool=tool_name, params=params, raw=raw.stdout,
                           clean=clean, exit_code=raw.exit_code,
                           duration_ms=raw.duration_ms,
                           error=raw.stderr if raw.exit_code != 0 else None)
+
+    def _audit_params(self, params: dict) -> dict:
+        return {
+            key: self._audit_value(key, value)
+            for key, value in (params or {}).items()
+        }
+
+    def _audit_value(self, key: str, value):
+        lowered = key.lower()
+        sensitive_key = any(
+            marker in lowered
+            for marker in (
+                "authorization", "cookie", "header", "password", "secret",
+                "token", "jwt", "credential", "session_storage",
+                "local_storage",
+            )
+        )
+        if sensitive_key:
+            return self._redact_sensitive_value(value, header_list=lowered == "headers")
+        if isinstance(value, dict):
+            return {k: self._audit_value(str(k), v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._audit_value(key, item) for item in value]
+        return value
+
+    def _redact_sensitive_value(self, value, header_list: bool = False):
+        if isinstance(value, dict):
+            return {
+                str(k): self._redact_sensitive_value(v)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            if header_list:
+                return [self._redact_header_arg(item) for item in value]
+            return [self._redact_sensitive_value(item) for item in value]
+        if value in (None, ""):
+            return value
+        return f"[REDACTED:{self._stable_hash(str(value))}]"
+
+    def _redact_header_arg(self, item):
+        text = str(item)
+        if text == "-H" or ":" not in text:
+            return text
+        name, value = text.split(":", 1)
+        if not value.strip():
+            return text
+        return f"{name}: [REDACTED:{self._stable_hash(value.strip())}]"
+
+    def _stable_hash(self, value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
     def check_safety(self, tool_name: str, params: dict,
                      mission: MissionState) -> None:

@@ -103,19 +103,35 @@ class OpsecController:
             else:
                 modified["timing"] = 2
 
-        # Add rate limiting where supported
-        if tool_name in ("httpx", "ffuf", "nuclei", "gobuster"):
+        # Add rate limiting where supported by each tool schema.
+        if tool_name in ("httpx", "nuclei"):
+            rate = self.get_rate_limit(tool_name)
+            modified["rate_limit"] = rate
+        elif tool_name == "ffuf":
             rate = self.get_rate_limit(tool_name)
             modified["rate_limit"] = rate
 
-        # Rotate user agent for HTTP tools
-        if tool_name in ("httpx", "ffuf", "nuclei", "wpscan", "gobuster"):
-            modified["user_agent"] = self.rotate_user_agent()
-
-        # Inject custom headers required by bug bounty programs
-        if self.custom_headers and tool_name in ("httpx", "ffuf", "nuclei", "wpscan", "gobuster", "curl"):
-            modified["custom_headers"] = self.custom_headers
-            logger.debug(f"Injecting custom headers into {tool_name}: {list(self.custom_headers.keys())}")
+        # Translate HTTP opsec controls into supported header arguments.
+        if tool_name in ("httpx", "ffuf", "nuclei"):
+            headers = self._header_map(modified.get("headers", {}))
+            if not isinstance(headers, dict):
+                modified["headers"] = headers
+                return modified
+            headers["User-Agent"] = self.rotate_user_agent()
+            for name, value in self.custom_headers.items():
+                headers[name] = value
+            modified["headers"] = headers
+        elif self.custom_headers and tool_name in ("wpscan", "gobuster", "curl"):
+            logger.debug(
+                f"Custom headers configured but not injected into unsupported "
+                f"{tool_name} schema: {list(self.custom_headers.keys())}"
+            )
 
         return modified
 
+    def _header_map(self, headers):
+        if not headers:
+            return {}
+        if isinstance(headers, dict):
+            return {str(name): str(value) for name, value in headers.items()}
+        return headers

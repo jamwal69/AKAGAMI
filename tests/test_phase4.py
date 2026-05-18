@@ -15,6 +15,7 @@ from reconforge.intel.models import (
     Task, ToolResult, Vulnerability,
 )
 from reconforge.intel.store import IntelStore
+from reconforge.orchestrator.master import MasterOrchestrator
 from reconforge.tools.mcp_bridge import McpBridge
 
 
@@ -68,6 +69,35 @@ class TestMcpBridge:
         result = asyncio.get_event_loop().run_until_complete(
             self.bridge.call("web_search", {"query": "test"}))
         assert result.exit_code == 1
+
+    def test_web_search_router_without_client_is_cleanly_unavailable(self):
+        bridge = McpBridge(router=MagicMock(), client=None)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            bridge.call("web_search", {"query": "test"}))
+
+        assert result.exit_code == 1
+        assert result.error == "web_search unavailable"
+        assert "web_search" not in bridge.get_available_tools()
+
+    def test_orchestrator_constructs_mcp_bridge_without_broken_web_search(self, tmp_path):
+        mission = MissionState(
+            target="example.com",
+            scope=["example.com"],
+        )
+        orch = MasterOrchestrator(
+            mission,
+            {"_db_path": str(tmp_path / "mission.db")},
+        )
+        try:
+            assert orch.mcp_bridge.router is orch.router
+            result = asyncio.get_event_loop().run_until_complete(
+                orch.mcp_bridge.call("web_search", {"query": "example.com"}))
+            assert result.exit_code == 1
+            assert result.error == "web_search unavailable"
+        finally:
+            orch.episodic.close()
+            orch.intel.close()
 
     def test_stats_tracking(self):
         asyncio.get_event_loop().run_until_complete(

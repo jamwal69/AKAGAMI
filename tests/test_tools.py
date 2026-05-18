@@ -70,8 +70,32 @@ class TestOpsec:
     def test_apply_opsec_params_httpx(self):
         opsec = OpsecController()
         params = opsec.apply_opsec_params("httpx", {"target": "test"})
-        assert "rate_limit" in params
-        assert "user_agent" in params
+        assert params["rate_limit"] == 5
+        assert isinstance(params["headers"], dict)
+        assert "user_agent" not in params
+        assert "custom_headers" not in params
+
+    @pytest.mark.parametrize("tool_name", ["httpx", "nuclei", "ffuf"])
+    def test_opsec_params_are_supported_by_tool_schema(self, tool_name):
+        from reconforge.tools.executor import ToolExecutor
+
+        opsec = OpsecController(
+            delay_min=0,
+            delay_max=0,
+            custom_headers={"X-Bounty": "required"},
+        )
+        executor = ToolExecutor()
+        params = {
+            "httpx": {"target": "example.com"},
+            "nuclei": {"target": "example.com"},
+            "ffuf": {"url": "https://example.com"},
+        }[tool_name]
+
+        opsec_params = opsec.apply_opsec_params(tool_name, params)
+        command = executor._build_command(tool_name, opsec_params)
+
+        assert "X-Bounty: required" in command
+        assert "User-Agent:" in " ".join(command)
 
 
 class TestScopeCheck:

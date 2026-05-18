@@ -4,7 +4,20 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from reconforge.intel.models import MissionState, Task, TaskStatus
+from reconforge.intel.models import (
+    GateResult,
+    MissionState,
+    MissionMode,
+    OsintFinding,
+    ReviewResult,
+    ReviewVerdict,
+    SecretFinding,
+    Task,
+    TaskStatus,
+    Vulnerability,
+    WebPath,
+)
+from reconforge.agents.exploit_planner import ExploitPlannerAgent
 from reconforge.orchestrator.master import MAX_TASK_RETRIES, MasterOrchestrator
 from reconforge.orchestrator.task_graph import TaskCoordinationGraph
 
@@ -238,6 +251,121 @@ class TestMasterOrchestratorScheduling:
         assert orch.task_graph.tasks["t1"].status == TaskStatus.FAILED
         assert orch.task_queue.qsize() == 0
 
+    def test_quarantined_findings_are_retained_unverified_without_events(self):
+        orch = self.make_orchestrator(active=False)
+        task = Task(id="t1", agent_type="osint", tool="whois",
+                    params={"target": "example.com"}, opsec_risk="passive")
+        finding = OsintFinding(
+            source_agent="osint",
+            source_tool="whois",
+            confidence=0.8,
+            mission_id=orch.mission.mission_id,
+            category="whois",
+            value="example.com",
+            context="registrant data",
+        )
+        review = ReviewResult(
+            verdict=ReviewVerdict.QUARANTINE,
+            reason="critic unavailable",
+            improved_finding={"verified": False, "confidence": 0.55},
+        )
+        orch.task_graph.load([task])
+        orch._register_task_fingerprints([task])
+        orch.agents = {"osint": MagicMock()}
+        orch.agents["osint"].run = AsyncMock(return_value=[finding])
+        orch.critic.review_batch = AsyncMock(return_value=[(finding, review)])
+
+        self.run(orch._execute_task(task))
+
+        retained = orch.intel.store.call_args.args[0]
+        assert len(retained) == 1
+        assert retained[0].verified is False
+        assert retained[0].confidence == 0.55
+        assert orch.task_graph.tasks["t1"].status == TaskStatus.COMPLETE
+        orch.event_bus.publish.assert_not_awaited()
+
+    def test_approved_vulnerabilities_are_enriched_and_scored_before_storage(self):
+        orch = self.make_orchestrator(active=True)
+        task = Task(id="t1", agent_type="vuln", tool="nuclei",
+                    params={"target": "example.com"}, opsec_risk="medium")
+        finding = Vulnerability(
+            source_agent="vuln",
+            source_tool="nuclei",
+            confidence=0.8,
+            mission_id=orch.mission.mission_id,
+            host_id="example.com",
+            title="Apache path traversal",
+            severity="info",
+            evidence="matched template",
+        )
+
+        async def enrich(vuln):
+            vuln.cve_id = "CVE-2021-41773"
+            vuln.cvss_score = 9.8
+            return vuln
+
+        async def score(vuln, context):
+            vuln.severity = "critical"
+            return vuln
+
+        orch.task_graph.load([task])
+        orch._register_task_fingerprints([task])
+        orch.agents = {"vuln": MagicMock()}
+        orch.agents["vuln"].run = AsyncMock(return_value=[finding])
+        orch.critic.review_batch = AsyncMock(return_value=[(
+            finding,
+            ReviewResult(verdict=ReviewVerdict.APPROVE),
+        )])
+        orch.enricher = MagicMock()
+        orch.enricher.enrich = AsyncMock(side_effect=enrich)
+        orch.scorer = MagicMock()
+        orch.scorer.score = AsyncMock(side_effect=score)
+
+        self.run(orch._execute_task(task))
+
+        stored = orch.intel.store.call_args.args[0]
+        assert len(stored) == 1
+        assert stored[0].verified is True
+        assert stored[0].cve_id == "CVE-2021-41773"
+        assert stored[0].cvss_score == 9.8
+        assert stored[0].severity == "critical"
+        orch.enricher.enrich.assert_awaited_once()
+        orch.scorer.score.assert_awaited_once()
+
+    def test_vulnerability_post_processing_failures_do_not_fail_task(self):
+        orch = self.make_orchestrator(active=True)
+        task = Task(id="t1", agent_type="vuln", tool="nuclei",
+                    params={"target": "example.com"}, opsec_risk="medium")
+        finding = Vulnerability(
+            source_agent="vuln",
+            source_tool="nuclei",
+            confidence=0.8,
+            mission_id=orch.mission.mission_id,
+            host_id="example.com",
+            title="Weak TLS",
+            severity="medium",
+            evidence="scanner output",
+        )
+        orch.task_graph.load([task])
+        orch._register_task_fingerprints([task])
+        orch.agents = {"vuln": MagicMock()}
+        orch.agents["vuln"].run = AsyncMock(return_value=[finding])
+        orch.critic.review_batch = AsyncMock(return_value=[(
+            finding,
+            ReviewResult(verdict=ReviewVerdict.APPROVE),
+        )])
+        orch.enricher = MagicMock()
+        orch.enricher.enrich = AsyncMock(side_effect=RuntimeError("nvd down"))
+        orch.scorer = MagicMock()
+        orch.scorer.score = AsyncMock(side_effect=RuntimeError("scorer down"))
+
+        self.run(orch._execute_task(task))
+
+        stored = orch.intel.store.call_args.args[0]
+        assert len(stored) == 1
+        assert stored[0].title == "Weak TLS"
+        assert orch.task_graph.tasks["t1"].status == TaskStatus.COMPLETE
+
     def test_dynamic_exploit_task_is_queued_when_ready(self):
         orch = self.make_orchestrator(active=False)
         task = Task(id="exploit-now", agent_type="exploit_planner",
@@ -338,3 +466,101 @@ class TestMasterOrchestratorScheduling:
         assert self.run(orch._add_dynamic_task(task)) is True
         assert self.run(orch._add_dynamic_task(task)) is False
         assert orch.task_queue.qsize() == 1
+
+    def test_evaluate_attack_paths_reads_typed_models(self, intel_store, mission):
+        orch = self.make_orchestrator(active=True)
+        orch.mission = mission
+        orch.intel = intel_store
+        orch.chainer = MagicMock()
+        orch.chainer.evaluate_chain = AsyncMock(return_value=None)
+
+        intel_store.write(Vulnerability(
+            source_agent="vuln",
+            source_tool="nuclei",
+            confidence=0.8,
+            mission_id=mission.mission_id,
+            host_id="10.0.0.1",
+            title="Missing HSTS",
+            severity="info",
+            evidence="nuclei output",
+        ))
+        intel_store.write(OsintFinding(
+            source_agent="osint",
+            source_tool="whois",
+            confidence=0.8,
+            mission_id=mission.mission_id,
+            category="whois",
+            value="example.com",
+            context="registrant",
+        ))
+        intel_store.write(SecretFinding(
+            source_agent="js_agent",
+            source_tool="trufflehog",
+            confidence=0.9,
+            mission_id=mission.mission_id,
+            host_id="app.example.com",
+            file_path="app.js",
+            secret_type="api_key",
+            secret_value="redacted-in-test",
+            is_verified=True,
+        ))
+        intel_store.write(WebPath(
+            source_agent="recon",
+            source_tool="ffuf",
+            confidence=0.8,
+            mission_id=mission.mission_id,
+            host_id="app.example.com",
+            url="https://app.example.com/admin",
+            status_code=200,
+            interesting=True,
+        ))
+
+        self.run(orch._evaluate_attack_paths())
+
+        findings = orch.chainer.evaluate_chain.await_args.args[0]
+        assert any(isinstance(f, Vulnerability) for f in findings)
+        assert any(isinstance(f, OsintFinding) for f in findings)
+        assert any(isinstance(f, SecretFinding) for f in findings)
+        assert any(isinstance(f, WebPath) for f in findings)
+
+    def test_standard_mode_gate_pass_does_not_unlock_without_operator_approval(self):
+        orch = self.make_orchestrator(active=True)
+        orch.mission.operator_approved = False
+        orch.mission.mode = MissionMode.STANDARD
+        gate = GateResult(passed=True, requires_operator_approval=True)
+        original = ExploitPlannerAgent.LOCKED
+        try:
+            ExploitPlannerAgent.lock()
+            if orch._operator_may_unlock_exploits(gate):
+                ExploitPlannerAgent.unlock()
+            assert ExploitPlannerAgent.is_locked() is True
+        finally:
+            ExploitPlannerAgent.LOCKED = original
+
+    def test_standard_mode_gate_pass_unlocks_with_operator_approval(self):
+        orch = self.make_orchestrator(active=True)
+        orch.mission.operator_approved = True
+        orch.mission.mode = MissionMode.STANDARD
+        gate = GateResult(passed=True, requires_operator_approval=True)
+        original = ExploitPlannerAgent.LOCKED
+        try:
+            ExploitPlannerAgent.lock()
+            if orch._operator_may_unlock_exploits(gate):
+                ExploitPlannerAgent.unlock()
+            assert ExploitPlannerAgent.is_locked() is False
+        finally:
+            ExploitPlannerAgent.LOCKED = original
+
+    def test_operator_approval_after_gate_pass_can_unlock_planner(self):
+        orch = self.make_orchestrator(active=True)
+        orch.mission.stage_gate_passed = True
+        orch.mission.operator_approved = True
+        orch.mission.mode = MissionMode.STANDARD
+        gate = GateResult(passed=True, requires_operator_approval=True)
+        original = ExploitPlannerAgent.LOCKED
+        try:
+            ExploitPlannerAgent.lock()
+            assert orch._unlock_exploits_if_allowed(gate) is True
+            assert ExploitPlannerAgent.is_locked() is False
+        finally:
+            ExploitPlannerAgent.LOCKED = original
