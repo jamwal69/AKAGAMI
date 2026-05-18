@@ -45,8 +45,8 @@ TOOL_DIRS = [
 def sanitize_name(name: str) -> str:
     """Sanitize a company name into a filesystem-safe directory name.
     
-    'HackerOne Corp.' → 'hackerone_corp'
-    'Google LLC' → 'google_llc'
+    'Example Corp.' → 'example_corp'
+    'Demo LLC' → 'demo_llc'
     """
     name = name.strip().lower()
     name = re.sub(r'[^\w\s-]', '', name)   # remove special chars
@@ -62,7 +62,7 @@ def init_workspace(company_name: str,
     """Create a structured workspace for a company/engagement.
     
     Args:
-        company_name: Human-readable company name (e.g. "HackerOne Corp")
+        company_name: Human-readable company name (e.g. "Example Corp")
         in_scope: List of in-scope domains/IPs/CIDRs
         out_of_scope: List of out-of-scope domains/IPs
         root: Override workspace root (default: ./workspace)

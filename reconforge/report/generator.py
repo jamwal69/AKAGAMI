@@ -10,6 +10,7 @@ Generates a comprehensive report with:
 
 import json
 from datetime import datetime, timezone
+from importlib.resources import files
 from pathlib import Path
 from typing import Optional
 
@@ -57,6 +58,11 @@ class ReportGenerator:
     def __init__(self, template_dir: str = "reconforge/report/templates",
                  router=None, client=None) -> None:
         self.template_dir = Path(template_dir)
+        if not self.template_dir.exists() and template_dir == "reconforge/report/templates":
+            try:
+                self.template_dir = Path(str(files("reconforge.report.templates")))
+            except Exception as e:
+                logger.warning(f"Packaged report templates unavailable: {e}")
         self.router = router
         # TODO: Remove deprecated client parameter after legacy callers migrate to router.
         _ = client

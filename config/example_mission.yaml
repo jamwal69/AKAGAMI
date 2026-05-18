@@ -1,0 +1,36 @@
+# Synthetic mission config for local development and documentation.
+# Uses reserved example domains/IP ranges only. Replace every value before real use.
+
+mission:
+  target: app.example.test
+  mission_name: "Synthetic External Recon"
+  company_name: "Example Organization"
+
+scope:
+  in_scope:
+    - app.example.test
+    - "*.example.test"
+    - "192.0.2.0/24"
+  out_of_scope:
+    - admin.example.test
+    - billing.example.test
+
+permissions:
+  passive_osint: true
+  active_scanning: false
+  subdomain_bruteforce: false
+  directory_fuzzing: false
+  vulnerability_scanning: false
+  operator_approved: false
+
+opsec:
+  enabled: true
+  scan_timing: 2
+  request_delay_min: 1
+  request_delay_max: 3
+  rotate_user_agents: true
+
+output:
+  report_path: "output/example_report.md"
+  intel_db_path: "output/example_missions.db"
+  log_level: "INFO"

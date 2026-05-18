@@ -127,7 +127,7 @@ class MasterOrchestrator:
         self.memory = WorkingMemory()
         self.sanitizer = OutputSanitizer()
 
-        # Load custom headers from mission config (e.g. X-Comolho-Client for ClearTax)
+        # Load optional program-required headers from mission config.
         custom_headers = config.get("custom_headers", {})
         self.opsec = OpsecController(custom_headers=custom_headers)
 

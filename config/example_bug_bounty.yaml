@@ -1,0 +1,35 @@
+# Synthetic bug bounty-style config for documentation.
+# No real company, program, scope, target, or required header is represented here.
+
+mission:
+  target: api.sandbox-target.test
+  mission_name: "Synthetic Bug Bounty Recon"
+  company_name: "Synthetic Program"
+
+scope:
+  in_scope:
+    - api.sandbox-target.test
+    - "*.sandbox-target.test"
+    - "198.51.100.0/24"
+  out_of_scope:
+    - payments.sandbox-target.test
+    - production.sandbox-target.test
+
+permissions:
+  passive_osint: true
+  active_scanning: false
+  subdomain_bruteforce: false
+  directory_fuzzing: false
+  vulnerability_scanning: false
+  operator_approved: false
+
+opsec:
+  enabled: true
+  scan_timing: 2
+  request_delay_min: 1
+  request_delay_max: 5
+  rotate_user_agents: true
+
+# Example only. Use a real program-required header only when the program rules require it.
+custom_headers:
+  X-Research-Context: "synthetic-example"

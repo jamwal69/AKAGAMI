@@ -1,9 +1,11 @@
 """Package metadata checks for runtime dependency and version drift."""
 
+from importlib.resources import files
 import re
 import tomllib
 from pathlib import Path
 
+import yaml
 from click.testing import CliRunner
 
 from reconforge.cli import AKAGAMI_TAGLINE, cli
@@ -61,3 +63,33 @@ def test_cli_version_matches_project_metadata():
     result = CliRunner().invoke(cli, ["--version"])
     assert result.exit_code == 0
     assert version in result.output
+
+
+def test_runtime_package_data_is_declared():
+    package_data = _project_metadata()["tool"]["setuptools"]["package-data"]["reconforge"]
+
+    assert "config/*.yaml" in package_data
+    assert "report/templates/*.j2" in package_data
+
+
+def test_packaged_tool_config_matches_root_config():
+    """Developer config and packaged fallback stay intentionally duplicated."""
+    root_config = (ROOT / "config" / "tools.yaml").read_text()
+    package_config = (ROOT / "reconforge" / "config" / "tools.yaml").read_text()
+
+    assert package_config == root_config
+
+
+def test_packaged_tool_config_resource_is_loadable():
+    resource = files("reconforge.config").joinpath("tools.yaml")
+
+    assert resource.is_file()
+    data = yaml.safe_load(resource.read_text(encoding="utf-8"))
+    assert {"whois", "httpx", "nuclei"} <= set(data["tools"])
+
+
+def test_packaged_report_template_resource_is_loadable():
+    resource = files("reconforge.report.templates").joinpath("recon_report.md.j2")
+
+    assert resource.is_file()
+    assert "executive_summary" in resource.read_text(encoding="utf-8")

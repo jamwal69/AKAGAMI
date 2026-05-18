@@ -8,6 +8,7 @@ import copy
 import re
 import shlex
 import time
+from importlib.resources import files
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,13 @@ class ToolExecutor:
         if config_path.exists():
             with open(config_path) as f:
                 return yaml.safe_load(f) or {}
+        if path == "config/tools.yaml":
+            try:
+                resource = files("reconforge.config").joinpath("tools.yaml")
+                with resource.open("r", encoding="utf-8") as f:
+                    return yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.warning(f"Packaged tools config unavailable: {e}")
         logger.warning(f"Tools config not found at {path}, using defaults")
         return {}
 

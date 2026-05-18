@@ -62,7 +62,7 @@ class OpsecController:
         self.delay_min = delay_min
         self.delay_max = delay_max
         self._last_ua_index = -1
-        # Custom headers required by bug bounty programs (e.g. X-Comolho-Client)
+        # Optional headers required by an authorized program's rules of engagement.
         self.custom_headers: dict[str, str] = custom_headers or {}
 
     async def delay(self) -> None:

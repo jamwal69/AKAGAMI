@@ -1,299 +1,159 @@
-# ⚔️ Akagami V2 Bug Bounty Edition
+# Akagami V2
 
-**Professional-grade, multi-agent reconnaissance and bug bounty engine. Free to run — no paid API subscriptions required.**
+Akagami is a Python 3.11+ reconnaissance automation tool for authorized security testing and bug bounty work. It coordinates OSINT collection, active recon, scanner output parsing, endpoint inventory, CVE enrichment, memory/storage, and Markdown reporting.
 
-Akagami (赤髪) is an autonomous penetration testing and bug bounty system that uses **NVIDIA NIM (DeepSeek V4 Flash)** for heavy reasoning and **Groq** for fast repetitive tasks. Specialized sub-agents handle discrete phases, and a three-tier memory system maintains persistent knowledge across sessions. It automates the full vulnerability discovery lifecycle — from passive OSINT, to active scanning, authenticated session capture, and deep JavaScript analysis — while maintaining strict scope enforcement and opsec controls.
+It is not a guaranteed bug-finding system. Passing tests and clean scanner output do not prove that a target is vulnerable or safe. Real HackerOne-style use still requires scope review, manual validation, and human judgment.
 
----
+## Capability Status Matrix
 
-## ⚡ Features
-
-### 🤖 Multi-Agent Architecture
-| Agent | Role | Tools |
-|-------|------|-------|
-| **OsintAgent** | Passive intelligence gathering | whois, crt.sh, theHarvester, Shodan, GitHub dorking, web search, subfinder, gau |
-| **ActiveReconAgent** | Network scanning & enumeration | nmap, httpx-pd, ffuf, banner grabbing, katana, arjun, corsy, ssrfmap |
-| **VulnAnalysisAgent** | Vulnerability detection | nuclei (authenticated), searchsploit, jwt_tool, graphql-cop, clairvoyance |
-| **BrowserAgent** | Authenticated session capture | Playwright (headless auth flows, JWT interception, DOM storage extraction) |
-| **JSAnalysisAgent** | JavaScript bundle semantic analysis | regex triggers, trufflehog (hardcoded secrets) |
-| **ExploitPlannerAgent** | Attack chain planning (Stage 2) | DeepSeek-powered planning (locked until stage gate passes or bug bounty trigger) |
-
-### 🧠 Intelligence Pipeline
-- **CriticAgent** — Co-RedTeam style reviewer that gates every finding before storage. Rejects false positives, flags overconfident results, improves incomplete findings, and does not auto-approve high-impact findings if critic review fails. Powered by DeepSeek V4 Flash (NIM).
-- **CveEnricher** — 3-stage CVE enrichment: ChromaDB (local) → NVD REST API → Groq correlation
-- **SeverityScorer** — CVSS→severity is a **pure Python lookup table** (no LLM). Contextual override via Groq only when environmental factors justify it (internet-facing + no WAF + exploit available)
-- **Deterministic Parsers** — One pure Python parser per tool (`reconforge/parsers/`). Zero LLM calls for parsing. Instant. Deterministic.
-
-### 🔀 Dual LLM Router (V2)
-All LLM calls route through `reconforge/llm/router.py`. Zero direct provider instantiation anywhere else.
-
-| Task Type | Provider | Model | Why |
+| Capability | Status | What is implemented | Current limits |
 |---|---|---|---|
-| `mission_planning` | NVIDIA NIM | DeepSeek V4 Flash | Complex multi-step reasoning |
-| `critic_review` | NVIDIA NIM | DeepSeek V4 Flash | Nuanced quality judgment |
-| `vuln_reasoning` | NVIDIA NIM | DeepSeek V4 Flash | Security knowledge-heavy |
-| `stage_gate_judgment` | NVIDIA NIM | DeepSeek V4 Flash | Final go/no-go decision |
-| `report_writing` | NVIDIA NIM | DeepSeek V4 Flash | Long-form professional prose |
-| `exploit_planning` | NVIDIA NIM | DeepSeek V4 Flash | Attack chain reasoning |
-| `context_summarization` | Groq | Llama 3.3 70B | Fast compression |
-| `contextual_scoring` | Groq | Llama 3.3 70B | Fast severity adjustment |
-| `cve_enrichment` | Groq | DeepSeek R1 Distill | Rapid CVE correlation |
-| `self_correction` | Groq | Llama 3.3 70B | Fast error analysis |
+| Workspace creation | Stable | Per-company workspace tree with scope files, output folders, SQLite DB, ChromaDB folder, and engagement log | Local filesystem only |
+| Scope enforcement | Stable | ToolBus checks domains, URLs, ports, IPs, CIDRs, and out-of-scope precedence before tool execution | Scope quality depends on mission config and operator review |
+| Safe command rendering | Stable | Subprocess commands are rendered from validated YAML definitions and executed without `shell=True` | External binaries must still be installed and trusted |
+| Deterministic parsing | Stable | Supported tool outputs are parsed by Python parser modules, not by LLMs | Unsupported or malformed output may fall back to partial/raw storage |
+| Intel storage | Stable | SQLite-backed storage for hosts, ports, web paths, vulnerabilities, OSINT, credentials, sessions, and endpoint inventory | Schema is local to this project |
+| Endpoint inventory | Stable | `akagami endpoints` shows high-signal HTTP/API surfaces from stored inventory | It ranks surfaces for manual testing; it does not prove exploitability |
+| Passive OSINT | Beta | whois, crt.sh, theHarvester, Shodan, GitHub code search, and web search paths exist | Shodan/GitHub require API keys; web search depends on the MCP/API bridge |
+| Active recon | Beta | nmap, ProjectDiscovery `httpx`, ffuf, nuclei, arjun, corsy, and ssrfmap execution paths exist | Requires explicit active permission and installed external binaries |
+| Report generation | Beta | Orchestrated missions can use router-backed prose plus a Jinja2 Markdown template; manual `akagami report` uses the same template with heuristic fallback prose | Manual report command does not initialize an LLM router |
+| CVE enrichment/scoring | Beta | Local ChromaDB lookup, NVD API lookup, Groq enrichment, CVSS lookup, and contextual scoring paths exist | Results require validation and depend on available CVE data/API access |
+| Browser/session capture | Experimental | Playwright can attempt simple login/capture flows and store redacted session context while keeping raw runtime auth in working memory | No polished CLI for selectors/credential workflows; authenticated scanning is not turnkey |
+| Authenticated nuclei handoff | Experimental | Captured runtime auth headers/cookies can be handed to nuclei in memory | Depends on successful browser capture and task ordering |
+| AI endpoint testing | Experimental | AI red-team agent has prompt-injection and endpoint test paths | Requires explicit task planning and careful scope control |
+| Exploit planning | Experimental | Planner can generate exploit plans after stage-gate conditions | Planning only; it does not execute exploits |
+| Watcher daemon | Experimental | `akagami watcher` polls a local `new_targets.txt` file and can launch missions for new entries | It does not currently poll HackerOne/Bugcrowd APIs; it consumes the local file |
+| subfinder/gau/katana | Configured but not wired | Definitions exist in `config/tools.yaml` and packaged `reconforge/config/tools.yaml` | Default agents/task graph do not currently execute them |
+| amass/masscan/gobuster/wpscan | Configured but not wired | Tool definitions exist | Not part of default mission execution |
+| Operator approval CLI | Not implemented | Stage-gate results can require operator approval in standard mode | There is no CLI command or prompt to set `mission.operator_approved` |
+| True mission resume execution | Not implemented | `akagami resume` prints resume context from episodic memory | It does not restart the orchestrator from the saved point |
+| Automated valid-bug discovery | Not implemented | The tool can collect evidence and scanner findings | It does not reliably discover complex business logic, authz, payment, race, or IDOR bugs by itself |
 
-If the primary provider fails, the fallback fires automatically and the mission continues.
-
-### 🧱 Three-Tier Memory
-| Layer | Backing | Purpose |
-|-------|---------|----|
-| **Working** | In-process dict | Current plan, recent results, agent context (12K token budget, auto-compression via Groq) |
-| **Episodic** | SQLite | Permanent audit trail — every tool call, finding, and summary. Enables mission resume |
-| **Semantic** | ChromaDB | RAG-based CVE lookups, exploit references, past report knowledge, tool guides |
-
-### 🔐 Security & Safety
-- **Scope enforcement** — Every tool call is checked against normalized domains, URLs, ports, IPs, punycode, and CIDR ranges before execution; out-of-scope rules take precedence over in-scope rules
-- **Centralized ToolBus enforcement** — Subprocess tools, API calls, and MCP calls route through ToolBus or an approved safety wrapper with scope, permission/risk, and sanitizer controls
-- **Deterministic command execution** — Tool commands are built from validated YAML schemas/templates with no raw argument injection
-- **Permission check** — Active tools blocked unless explicitly permitted
-- **Anti-prompt-injection** — Output sanitizer on all tool results before reaching any LLM
-- **Opsec controls** — Timing randomization, rate limiting, user-agent rotation, nmap timing override
-- **Bug Bounty Mode / Stage gate** — Normally, exploit planning is locked until reconnaissance is deemed complete. In `--mode bug-bounty`, a high-confidence finding instantly overrides the gate to trigger opportunistic exploitation.
-- **Operator approval** — Required before advancing to exploitation stage in standard mode
-
-### 📊 Professional Reporting
-- DeepSeek-powered executive summaries and prioritized recommendations
-- Risk scoring (CRITICAL → INFORMATIONAL with weighted vulnerability/credential analysis)
-- Full Jinja2 template with vulnerability details, OSINT findings, credential alerts, timeline
-- Markdown output ready for client delivery
-
-### 🔄 Resilience & Performance
-- **Parallel Execution** — Massive 10x speedup via `asyncio.gather` for task execution.
-- **Self-correction loops** — Failed tasks get LLM-powered error analysis, and retries are validated so they cannot change scope, tool, or risk class
-- **Dependency-aware execution** — Tasks run only after prerequisites succeed; failed prerequisites block dependents.
-- **Mission resume** — Restore interrupted missions from episodic memory
-- **Retry logic** — Tenacity exponential backoff on all API calls (NIM, Groq, NVD, Shodan)
-- **Graceful fallbacks** — Every LLM-dependent component has a heuristic fallback
-
-### 📂 Structured Workspaces (Bug Bounty Ready)
-Every engagement gets its own isolated directory tree — no more dumping everything into a shared `output/` folder.
-
-```
-workspace/
-└── hackerone/
-    ├── scope/
-    │   ├── in_scope.txt        ← domains/IPs allowed
-    │   └── out_of_scope.txt    ← domains/IPs excluded
-    ├── output/
-    │   ├── reports/            ← final Markdown reports
-    │   ├── nmap/               ← raw nmap XML output
-    │   ├── nuclei/             ← nuclei JSONL results
-    │   ├── httpx/              ← httpx-pd JSONL results
-    │   ├── ffuf/               ← ffuf JSON results
-    │   ├── amass/              ← amass enumeration output
-    │   ├── katana/             ← katana JS/endpoint crawling
-    │   ├── gau/                ← wayback machine URL discovery
-    │   ├── osint/              ← whois, theharvester, subfinder, crt.sh
-    │   └── misc/               ← anything else
-    ├── data/
-    │   ├── missions.db         ← SQLite intel store + episodic memory
-    │   └── chromadb/           ← ChromaDB vector store
-    └── notes/
-        └── engagement_log.md   ← auto-created engagement journal
-```
-
-- Workspace is **auto-created** when you pass `--company` (or `-C`) to the `recon` command
-- If you omit `--company`, the target domain name is used as the company name
-- Scope files are **append-only** — running against the same company again adds new targets without duplicating
-- Engagement log is timestamped automatically on mission start/end
-- All databases, reports, and tool output go inside the company folder
-
----
-
-## 🚀 Quick Start
+## Installation
 
 ```bash
-# Clone and install
-cd reconforge
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
+python -m pip install -e .
 ```
 
-Edit `.env` with your keys:
+For development:
+
 ```bash
-# NVIDIA NIM — free at https://build.nvidia.com/
-NVIDIA_NIM_API_KEY=nvapi-...
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+The package exposes the `akagami` console script:
+
+```bash
+akagami --version
+```
+
+## Environment Variables
+
+Akagami loads `.env` during orchestrated missions.
+
+```bash
+# Optional, enables LLM-backed planning/review/report prose when configured
+NVIDIA_NIM_API_KEY=...
 NVIDIA_NIM_MODEL=deepseek-ai/deepseek-v4-flash
 
-# Groq — free at https://console.groq.com/
-GROQ_API_KEY=gsk_...
+GROQ_API_KEY=...
 GROQ_MODEL_FAST=llama-3.3-70b-versatile
 GROQ_MODEL_REASONING=deepseek-r1-distill-llama-70b
+
+# Optional passive OSINT integrations
+SHODAN_API_KEY=...
+GITHUB_TOKEN=...
 ```
 
+Without LLM keys, many components use heuristic fallbacks, but advanced planning, critic review, enrichment, scoring context, and report prose are reduced.
+
+## External Tools
+
+Install only the tools needed for the modes you intend to run.
+
+| Area | Tools used by wired code paths |
+|---|---|
+| Passive OSINT | `whois`, `curl`, `theHarvester` |
+| Active recon | `nmap`, ProjectDiscovery `httpx`, `ffuf`, `nuclei`, `arjun`, `corsy`, `ssrfmap` |
+| Vulnerability and technology checks | `nuclei`, `searchsploit`, `jwt_tool`, `graphql-cop`, `clairvoyance` |
+| JavaScript/secret checks | `trufflehog` |
+| Browser capture | Playwright Chromium |
+
+`subfinder`, `gau`, `katana`, `amass`, `masscan`, `gobuster`, and `wpscan` are present in the tool config but are not wired into default agent execution at this checkpoint.
+
+## CLI Commands
+
 ```bash
-# Run passive-only recon (auto-creates workspace/example/ folder)
-python -m reconforge.cli recon --target example.com --passive-only
-
-# Run with explicit company name (creates workspace/hackerone/)
-python -m reconforge.cli recon --target example.com -C "HackerOne" --active
-
-# Run with opsec controls
-python -m reconforge.cli recon --target example.com -C "HackerOne" --active --opsec-mode
-
-# List all company workspaces
-python -m reconforge.cli workspaces
+akagami recon -t <target> [-C <company>] [--passive-only|--active] [--opsec-mode] [--mode standard|bug-bounty] [-c config/mission.yaml]
 ```
 
-## 📋 CLI Commands
+Starts a mission, creates or updates a workspace, loads mission config, and runs the orchestrator. Active scans require `--active` and `permissions.active_scanning: true` in the mission config.
 
 ```bash
-# Reconnaissance (with company workspace and Bug Bounty mode)
-akagami recon -t <target> -C <company> [--passive-only|--active] [--opsec-mode] [--mode standard|bug-bounty] [-c config.yaml]
-
-# List all company workspaces
 akagami workspaces
-
-# View intel store (company-aware)
-akagami intel -m <mission-id> -C <company> [-f table|json]
-
-# View high-signal HTTP/API endpoints (company-aware)
-akagami endpoints -m <mission-id> -C <company> [-l <limit>] [-f table|json]
-
-# Resume interrupted mission
-akagami resume -m <mission-id> -C <company>
-
-# Evaluate stage gate
-akagami gate -m <mission-id> -t <target> -C <company>
-
-# Generate report (auto-saves to workspace/company/output/reports/)
-akagami report -m <mission-id> -t <target> -C <company>
-
-# Database management
-akagami db seed-cves --nvd-feed <path-to-nvd-json>
-akagami db stats
 ```
 
----
+Lists known company workspaces under `workspace/`.
 
-## 🏗 Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Master Orchestrator                     │
-│           (NIM/DeepSeek planning + self-correction)         │
-├──────────┬───────────┬──────────────┬───────────────────────┤
-│  OSINT   │  Active   │    Vuln      │   Exploit Planner     │
-│  Agent   │  Recon    │  Analysis    │   (Stage 2, locked)   │
-│          │  Agent    │   Agent      │                       │
-├──────────┴───────────┴──────────────┴───────────────────────┤
-│              CriticAgent (NIM — gates all findings)         │
-├──────────┬───────────┬─────────────────────────────────────┤
-│ ToolBus  │MCP Bridge │  CveEnricher (Groq)                 │
-│(subprocess)│(API calls)│  ChromaDB → NVD → Groq           │
-├──────────┴───────────┴─────────────────────────────────────┤
-│         LLM Router: NIM (heavy) ↔ Groq (fast)             │
-├────────────────────────────────────────────────────────────┤
-│  Working Memory │ Episodic Memory  │  Semantic Memory      │
-│  (in-process)   │   (SQLite)       │   (ChromaDB)          │
-├─────────────────┴──────────────────┴──────────────────────┤
-│                      Intel Store                           │
-│       (SQLite: hosts, ports, vulns, creds, ...)            │
-└────────────────────────────────────────────────────────────┘
+```bash
+akagami intel -m <mission-id> [-C <company>] [-f table|json]
 ```
 
-### V2 Data Flow
+Reads stored intel from the mission database and prints a table or JSON.
 
-```
-1. Orchestrator plans tasks (NIM/DeepSeek or default DAG plan)
-2. Tasks execute via agents → ToolBus (scope + permission + sanitizer) → subprocess/MCP/API
-3. Raw output → Deterministic Parser (pure Python, zero LLM)
-4. Findings → CriticAgent (NIM) → approved/rejected/improved
-5. Approved findings → SeverityScorer (CVSS lookup table + Groq context)
-6.                  → CveEnricher (Groq) → IntelStore
-7. StageGate (NIM judgment) → unlock ExploitPlanner
-8. ReportGenerator (NIM prose + Jinja2 tables) → Markdown report
+```bash
+akagami endpoints -m <mission-id> [-C <company>] [-l 20] [-f table|json]
 ```
 
----
+Shows ranked HTTP/API inventory rows for manual review.
 
-## 📁 Project Structure
-
-```
-reconforge/
-├── workspace.py             # ← NEW: per-company directory scaffolding
-├── agents/
-│   ├── base.py              # BaseAgent ABC — uses LLMRouter, not direct client
-│   ├── osint.py             # Passive OSINT (whois, crt.sh, Shodan, GitHub)
-│   ├── recon.py             # Active scanning (nmap, httpx, ffuf, arjun, corsy)
-│   ├── vuln.py              # Vulnerability analysis (nuclei, jwt_tool, graphql)
-│   ├── browser.py           # Playwright headless browser for auth and tokens
-│   ├── js_analysis.py       # JavaScript semantic and secret analysis
-│   └── exploit_planner.py   # Exploit planning (Stage 2, locked)
-├── llm/                     # LLM abstraction layer
-│   ├── router.py            # Single entry point — all LLM calls go here
-│   ├── fallback.py          # Cross-provider fallback + LLMUnavailableError
-│   └── providers/
-│       ├── nvidia_nim.py    # DeepSeek V4 Flash via openai SDK (streaming)
-│       └── groq.py          # Llama/DeepSeek via openai SDK (fast)
-├── parsers/                 # Deterministic per-tool parsers
-│   ├── nmap_parser.py       # XML via ElementTree — open ports only
-│   ├── nuclei_parser.py     # JSONL — CVE/CVSS extraction
-│   ├── httpx_parser.py      # JSONL — interesting path detection (20+ keywords)
-│   ├── amass_parser.py      # JSONL + plain-text fallback
-│   ├── ffuf_parser.py       # JSON results array
-│   ├── whois_parser.py      # python-whois library
-│   └── theharvester_parser.py # JSON — deduped emails/hosts/IPs
-├── intel/
-│   ├── models.py            # Pydantic v2 models (Host, Port, Vuln, MissionState...)
-│   └── store.py             # SQLite intel store with dedup
-├── memory/
-│   ├── working.py           # In-process context (12K token budget)
-│   ├── episodic.py          # SQLite audit trail + mission resume
-│   ├── semantic.py          # ChromaDB vector store (CVE, exploits, reports)
-│   └── summarizer.py        # Groq context compression
-├── orchestrator/
-│   ├── master.py            # Main loop + self-correction (NIM-powered)
-│   ├── task_graph.py        # DAG-based task scheduling
-│   └── stage_gate.py        # Arithmetic metrics + NIM go/no-go judgment
-├── report/
-│   ├── generator.py         # NIM prose + Jinja2 tables
-│   └── templates/           # Jinja2 Markdown templates
-├── skills/
-│   ├── critic.py            # Finding review — powered by NIM/DeepSeek
-│   ├── enricher.py          # CVE enrichment — powered by Groq
-│   ├── parser.py            # TOMBSTONED V2 — see reconforge/parsers/
-│   └── scorer.py            # CVSS lookup table (pure Python) + Groq context
-├── tools/
-│   ├── bus.py               # Central tool dispatcher (scope/opsec/log)
-│   ├── executor.py          # Safe subprocess execution (never shell=True)
-│   ├── mcp_bridge.py        # Shodan/GitHub/web search via APIs
-│   └── definitions/         # Per-tool YAML configs with required_flags
-├── utils/
-│   ├── logger.py            # Rich logging with finding/scope formatters
-│   ├── sanitizer.py         # Anti-prompt-injection output cleaner
-│   └── opsec.py             # Timing, rate limiting, user-agent rotation
-└── cli.py                   # Click CLI with Rich display + workspace support
+```bash
+akagami resume -m <mission-id> [-C <company>]
 ```
 
----
+Prints saved mission context from episodic memory. It does not continue execution automatically.
 
-## ⚙️ Configuration
+```bash
+akagami gate -m <mission-id> [-t <target>] [-C <company>]
+```
 
-### Mission Config (`config/mission.yaml`)
+Evaluates whether stored recon data is broad enough to pass the stage gate.
+
+```bash
+akagami report -m <mission-id> [-t <target>] [-n <name>] [-C <company>] [-o output/report.md]
+```
+
+Generates a Markdown report from stored intel. This manual command uses the packaged Jinja2 template and heuristic fallback prose because it does not initialize the LLM router.
+
+```bash
+akagami db seed-cves --nvd-feed <path-to-nvd-json> [--persist-dir output/chromadb]
+akagami db stats [--persist-dir output/chromadb]
+```
+
+Seeds or inspects the local ChromaDB CVE store.
+
+```bash
+akagami watcher
+```
+
+Starts the experimental watcher loop. Current behavior watches for a local `new_targets.txt`, consumes it, and launches bug-bounty-mode missions for new targets.
+
+## Mission Configuration
+
+Default source checkout config lives at `config/mission.yaml`. Installed packages also carry the runtime tool definitions needed by the default executor.
 
 ```yaml
 mission:
   target: example.com
-  mission_name: "Q4 External Assessment"
+  mission_name: "Authorized External Recon"
+  company_name: "Example"
 
 scope:
   in_scope:
     - example.com
     - "*.example.com"
-    - "192.168.1.0/24"
   out_of_scope:
-    - production.example.com
     - "10.0.0.0/8"
 
 permissions:
@@ -303,54 +163,93 @@ opsec:
   enabled: true
 ```
 
-### Environment Variables (`.env`)
+Safe synthetic examples are available in `config/example_mission.yaml`, `config/example_bug_bounty.yaml`, and `docs/example_scenario.md`. Use target-specific configs only for private/local engagements. Do not publish real program scopes, customer names, headers, tokens, or mission artifacts.
 
-```bash
-# Required — get free at https://build.nvidia.com/
-NVIDIA_NIM_API_KEY=nvapi-...
-NVIDIA_NIM_MODEL=deepseek-ai/deepseek-v4-flash
+## Workspace Layout
 
-# Required — get free at https://console.groq.com/
-GROQ_API_KEY=gsk_...
-GROQ_MODEL_FAST=llama-3.3-70b-versatile
-GROQ_MODEL_REASONING=deepseek-r1-distill-llama-70b
+Running a mission creates this tree:
 
-# Optional — enables Shodan OSINT
-SHODAN_API_KEY=...
-
-# Optional — enables GitHub dorking
-GITHUB_TOKEN=...
+```text
+workspace/
+└── <company>/
+    ├── scope/
+    │   ├── in_scope.txt
+    │   ├── out_of_scope.txt
+    │   └── subdomains.txt
+    ├── output/
+    │   ├── reports/
+    │   ├── nmap/
+    │   ├── nuclei/
+    │   ├── httpx/
+    │   ├── ffuf/
+    │   ├── amass/
+    │   ├── osint/
+    │   └── misc/
+    ├── loot/
+    ├── data/
+    │   ├── missions.db
+    │   └── chromadb/
+    └── notes/
+        └── engagement_log.md
 ```
 
----
+There are no default `katana/` or `gau/` workspace output directories in the current code.
 
-## 🧪 Testing
+## Real-World Bug Bounty Usefulness
 
-```bash
-# Run all tests (365 tests)
-python -m pytest tests/ -v
+Akagami is most useful as a recon and evidence organization assistant. It can help map domains, services, HTTP metadata, endpoint inventory, scanner findings, CVE candidates, obvious exposed paths, and verified secret findings when the right tools and inputs are available.
 
-# Run by phase/component
-python -m pytest tests/test_intel.py tests/test_memory.py tests/test_orchestrator.py tests/test_tools.py -v  # Phase 1 (44 tests)
-python -m pytest tests/test_phase2.py -v    # Phase 2: Active recon
-python -m pytest tests/test_phase3.py -v    # Phase 3: Vuln analysis + memory
-python -m pytest tests/test_phase4.py -v    # Phase 4: MCP + exploit planner
-python -m pytest tests/test_phase5.py -v    # Phase 5: Integration + resilience
-python -m pytest tests/test_v2.py -v        # V2: Parsers + router + CVSS table
-python -m pytest tests/test_workspace.py -v # Workspace manager (23 tests)
+It is unlikely to reliably find complex business logic bugs, authorization bypasses, chained privilege escalation, payment flaws, race conditions, deep IDORs, subtle GraphQL/API abuse, or client-specific workflow bugs without a human building and validating the test cases.
+
+For a real HackerOne target, treat output as leads. Validate scope, reproduce manually, remove false positives, and write the final report yourself.
+
+## Safety Model
+
+- Passive mode is the safer default.
+- Active scanning requires both the `--active` CLI flag and mission config permission.
+- ToolBus enforces scope before execution.
+- Out-of-scope entries take precedence over in-scope entries.
+- Opsec mode applies timing/rate/user-agent controls where supported.
+- Raw auth captured by the browser agent is kept in sensitive working memory; stored session context is redacted.
+- Exploit planning is plan-only and should not be treated as authorization to run exploit commands.
+
+Standard mode can require operator approval before exploitation-stage planning, but there is currently no CLI workflow to grant that approval.
+
+## Project Structure
+
+```text
+reconforge/
+├── agents/          # OSINT, active recon, vuln, browser, JS, AI, exploit planner agents
+├── config/          # Packaged runtime tool definitions
+├── intel/           # Pydantic models, SQLite store, endpoint inventory helpers
+├── llm/             # Provider router and provider clients
+├── memory/          # Working, episodic, semantic, and summarization memory
+├── orchestrator/    # Master orchestrator, task graph, event bus, stage gate
+├── parsers/         # Deterministic parsers for supported tool outputs
+├── report/          # Markdown report generator and packaged Jinja2 template
+├── skills/          # Critic, CVE enricher, parser tombstone, severity scorer
+├── tools/           # ToolBus, executor, scope checks, MCP/API bridge
+├── utils/           # Logging, sanitizer, opsec helpers
+├── cli.py           # Click CLI entry point
+├── watcher.py       # Experimental local-file watcher
+└── workspace.py     # Per-company workspace creation helpers
 ```
 
----
+## Testing and Build
 
-## ⚖️ Legal
+```bash
+python -m pytest tests/ -q
+python -m compileall reconforge tests
+python -m build --no-isolation --outdir /tmp/reconforge-build
+git diff --check
+```
 
-> **This tool requires explicit operator confirmation of scope before any scanning.**
-> It never assumes permission. Always obtain written authorization before testing.
-> Akagami is designed for authorized penetration testing engagements only.
-> Unauthorized use against systems you do not own or have permission to test is illegal.
+Current release-hardening checkpoint: 369 tests are expected after the package-data tests added in this pass.
 
----
+## Public Release Hygiene
 
-*Built with DeepSeek V4 Flash (NVIDIA NIM) • Groq Llama 3.3 70B • Python 3.11+ • SQLite • ChromaDB*
+Before publishing, verify private/local artifacts such as `.env`, `venv/`, `.pytest_cache/`, `akagami.egg-info/`, `output/`, `workspace/`, real target configs, and real scenario logs are not tracked. Public examples should stay synthetic and use reserved domains/IP ranges only.
 
-# AKAGAMI
+## Legal
+
+Use Akagami only on systems you own or are explicitly authorized to test. Confirm program scope before every mission, especially before enabling active scans, authenticated testing, watcher-triggered missions, or exploit planning.

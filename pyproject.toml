@@ -40,3 +40,12 @@ akagami = "reconforge.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["reconforge*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+reconforge = [
+    "config/*.yaml",
+    "report/templates/*.j2",
+]

@@ -16,19 +16,19 @@ from reconforge.workspace import (
 
 class TestSanitizeName:
     def test_basic(self):
-        assert sanitize_name("HackerOne Corp.") == "hackerone_corp"
+        assert sanitize_name("Example Corp.") == "example_corp"
 
     def test_spaces_and_dashes(self):
-        assert sanitize_name("Bug Crowd - Main") == "bug_crowd_main"
+        assert sanitize_name("Demo Program - Main") == "demo_program_main"
 
     def test_special_chars(self):
-        assert sanitize_name("Google (LLC)") == "google_llc"
+        assert sanitize_name("Sample (LLC)") == "sample_llc"
 
     def test_already_clean(self):
-        assert sanitize_name("tesla") == "tesla"
+        assert sanitize_name("sample") == "sample"
 
     def test_leading_trailing_whitespace(self):
-        assert sanitize_name("  Apple  ") == "apple"
+        assert sanitize_name("  Example  ") == "example"
 
     def test_multiple_underscores(self):
         assert sanitize_name("foo___bar") == "foo_bar"
