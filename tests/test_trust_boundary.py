@@ -272,6 +272,25 @@ def test_theharvester_calls_use_schema_params_only():
     assert "args" not in params
 
 
+def test_theharvester_text_parser_ignores_banner_author_email():
+    agent = OsintAgent.__new__(OsintAgent)
+    agent.name = "osint_agent"
+    agent.logger = MagicMock()
+    output = (
+        "theHarvester by cmartorella@edge-security.com\n"
+        "security@example.com\n"
+        "admin@evil.com\n"
+        "www.example.com\n"
+    )
+
+    findings = agent._parse_theharvester_text(output, "example.com", MID)
+    values = {getattr(finding, "value", "") for finding in findings}
+
+    assert "security@example.com" in values
+    assert "cmartorella@edge-security.com" not in values
+    assert "admin@evil.com" not in values
+
+
 def test_nuclei_route_uses_schema_and_does_not_reference_missing_memory():
     agent = VulnAnalysisAgent.__new__(VulnAnalysisAgent)
     agent.name = "vuln_agent"

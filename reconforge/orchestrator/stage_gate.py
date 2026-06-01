@@ -120,6 +120,7 @@ class StageGate:
             "hosts_discovered": hosts_count,
             "hosts_with_port_scans": hosts_with_ports,
             "total_ports": len(ports),
+            "osint_findings": len(osint),
             "osint_categories": len(osint_categories),
             "osint_category_names": list(osint_categories),
             "vulns_found": len(vulns),
@@ -138,7 +139,11 @@ class StageGate:
         if metrics["hosts_discovered"] < self.thresholds["min_hosts_verified"]:
             failures.append(f"Need {self.thresholds['min_hosts_verified']} hosts, found {metrics['hosts_discovered']}")
         if metrics["osint_categories"] < self.thresholds["min_osint_categories"]:
-            failures.append(f"Need {self.thresholds['min_osint_categories']} OSINT categories, covered {metrics['osint_categories']}")
+            failures.append(
+                f"Need {self.thresholds['min_osint_categories']} OSINT categories, "
+                f"covered {metrics['osint_categories']} categories from "
+                f"{metrics.get('osint_findings', 0)} OSINT findings"
+            )
         if metrics["average_confidence"] < self.thresholds["min_confidence_average"]:
             failures.append(f"Avg confidence {metrics['average_confidence']:.0%} below {self.thresholds['min_confidence_average']:.0%}")
         if self.thresholds["require_vuln_scan"] and metrics["vulns_found"] == 0 and metrics["hosts_discovered"] > 0:

@@ -1,5 +1,6 @@
 """Tests for all deterministic parsers. No mocks. No network. No LLM."""
 
+import asyncio
 import pytest
 from reconforge.parsers.nmap_parser import NmapParser
 from reconforge.parsers.nuclei_parser import NucleiParser
@@ -260,6 +261,28 @@ class TestTheHarvesterParser:
     def test_invalid_json_returns_empty(self):
         assert TheHarvesterParser().parse("not json", MID, AGENT) == []
 
+    def test_filters_banner_metadata_and_out_of_scope_emails(self):
+        raw = """{
+          "emails": [
+            "cmartorella@edge-security.com",
+            "security@example.com",
+            "admin@evil.com"
+          ],
+          "hosts": ["www.example.com", "edge-security.com"],
+          "interesting_urls": ["https://api.example.com/v1", "https://evil.com"],
+          "ips": []
+        }"""
+        results = TheHarvesterParser().parse(raw, MID, AGENT, target="example.com")
+        values = {getattr(r, "value", "") for r in results}
+
+        assert "security@example.com" in values
+        assert "www.example.com" in values
+        assert "https://api.example.com/v1" in values
+        assert "cmartorella@edge-security.com" not in values
+        assert "admin@evil.com" not in values
+        assert "edge-security.com" not in values
+        assert "https://evil.com" not in values
+
 
 # ── LLM Router ────────────────────────────────────────────────
 
@@ -317,6 +340,100 @@ class TestLLMRouter:
         router = LLMRouter()
         assert router.status()["nim_model"] == DEFAULT_NIM_MODEL
         assert DEFAULT_NIM_MODEL == "deepseek-ai/deepseek-v4-flash"
+
+    def test_no_keys_enters_offline_mode_without_fallback_calls(self, monkeypatch):
+        from unittest.mock import AsyncMock
+        from reconforge.llm.fallback import LLMUnavailableError
+        from reconforge.llm.router import LLMRouter
+
+        monkeypatch.delenv("NVIDIA_NIM_API_KEY", raising=False)
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.delenv("AKAGAMI_NO_LLM", raising=False)
+
+        router = LLMRouter()
+        router._fallback.call = AsyncMock(side_effect=AssertionError("fallback called"))
+
+        with pytest.raises(LLMUnavailableError):
+            asyncio.get_event_loop().run_until_complete(router.call(
+                task_type="mission_planning",
+                system="system",
+                messages=[{"role": "user", "content": "prompt"}],
+            ))
+
+        assert router.status()["offline_mode"] is True
+        assert router._fallback.call.await_count == 0
+
+    def test_no_llm_env_prevents_provider_initialization(self, monkeypatch):
+        from reconforge.llm import router as router_module
+        from reconforge.llm.router import LLMRouter
+
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-nim")
+        monkeypatch.setenv("GROQ_API_KEY", "test-groq")
+        monkeypatch.setenv("AKAGAMI_NO_LLM", "1")
+        monkeypatch.setattr(
+            router_module,
+            "NvidiaProvider",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("NIM initialized")),
+        )
+        monkeypatch.setattr(
+            router_module,
+            "GroqProvider",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Groq initialized")),
+        )
+
+        router = LLMRouter()
+
+        assert not router.is_available()
+        assert router.status()["offline_reason"] == "AKAGAMI_NO_LLM=1"
+
+    def test_placeholder_api_keys_are_ignored_without_provider_initialization(self, monkeypatch):
+        from reconforge.llm import router as router_module
+        from reconforge.llm.router import LLMRouter
+
+        initialized = []
+        warnings = []
+
+        def fail_provider(name):
+            def _fail(*args, **kwargs):
+                initialized.append(name)
+                raise AssertionError(f"{name} provider initialized")
+            return _fail
+
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-xxxx")
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_xxxx")
+        monkeypatch.delenv("AKAGAMI_NO_LLM", raising=False)
+        monkeypatch.setattr(LLMRouter, "_placeholder_warnings_emitted", set())
+        monkeypatch.setattr(LLMRouter, "_offline_warnings_emitted", set())
+        monkeypatch.setattr(
+            router_module,
+            "NvidiaProvider",
+            fail_provider("NIM"),
+        )
+        monkeypatch.setattr(
+            router_module,
+            "GroqProvider",
+            fail_provider("Groq"),
+        )
+        monkeypatch.setattr(
+            router_module.logger,
+            "warning",
+            lambda message: warnings.append(str(message)),
+        )
+
+        router = LLMRouter()
+
+        assert initialized == []
+        assert not router.is_available()
+        placeholder_warnings = [
+            message for message in warnings
+            if message.startswith("Ignoring placeholder LLM API key")
+        ]
+        assert placeholder_warnings == [
+            "Ignoring placeholder LLM API key(s): GROQ_API_KEY, NVIDIA_NIM_API_KEY"
+        ]
+        warning_text = "\n".join(warnings)
+        assert "nvapi-xxxx" not in warning_text
+        assert "gsk_xxxx" not in warning_text
 
 
 # ── SeverityScorer lookup table ───────────────────────────────

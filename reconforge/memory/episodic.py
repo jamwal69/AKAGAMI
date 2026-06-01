@@ -17,7 +17,10 @@ _EPISODIC_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS missions (
     id TEXT PRIMARY KEY, target TEXT NOT NULL,
     started_at TEXT NOT NULL, completed_at TEXT,
-    stage TEXT DEFAULT 'recon', config_json TEXT
+    stage TEXT DEFAULT 'recon', config_json TEXT,
+    stage_gate_passed INTEGER DEFAULT 0,
+    operator_approved INTEGER DEFAULT 0,
+    stage_gate_json TEXT
 );
 CREATE TABLE IF NOT EXISTS actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, mission_id TEXT NOT NULL,
@@ -50,15 +53,50 @@ class EpisodicMemory:
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_EPISODIC_TABLES_SQL)
+        self._migrate_schema()
         self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
 
-    def create_mission(self, mission_id: str, target: str, config: Optional[dict] = None) -> None:
+    def _migrate_schema(self) -> None:
+        """Add mission-control columns to existing mission databases."""
+        columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(missions)").fetchall()
+        }
+        migrations = {
+            "stage_gate_passed": "ALTER TABLE missions ADD COLUMN stage_gate_passed INTEGER DEFAULT 0",
+            "operator_approved": "ALTER TABLE missions ADD COLUMN operator_approved INTEGER DEFAULT 0",
+            "stage_gate_json": "ALTER TABLE missions ADD COLUMN stage_gate_json TEXT",
+        }
+        for column, sql in migrations.items():
+            if column not in columns:
+                self.conn.execute(sql)
+
+    def create_mission(
+        self,
+        mission_id: str,
+        target: str,
+        config: Optional[dict] = None,
+        *,
+        stage_gate_passed: bool = False,
+        operator_approved: bool = False,
+        stage_gate: Optional[dict] = None,
+    ) -> None:
         self.conn.execute(
-            "INSERT OR IGNORE INTO missions (id, target, started_at, config_json) VALUES (?, ?, ?, ?)",
-            (mission_id, target, datetime.now(timezone.utc).isoformat(), json.dumps(config) if config else None))
+            "INSERT OR IGNORE INTO missions "
+            "(id, target, started_at, config_json, stage_gate_passed, operator_approved, stage_gate_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                mission_id,
+                target,
+                datetime.now(timezone.utc).isoformat(),
+                json.dumps(config) if config else None,
+                int(stage_gate_passed),
+                int(operator_approved),
+                json.dumps(stage_gate) if stage_gate else None,
+            ))
         self.conn.commit()
         logger.info(f"Mission created: {mission_id} → {target}")
 
@@ -70,6 +108,74 @@ class EpisodicMemory:
     def get_mission(self, mission_id: str) -> Optional[dict]:
         row = self.conn.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
         return dict(row) if row else None
+
+    def update_mission_control(
+        self,
+        mission_id: str,
+        *,
+        stage_gate_passed: Optional[bool] = None,
+        operator_approved: Optional[bool] = None,
+        stage_gate: Optional[dict] = None,
+    ) -> bool:
+        """Update stage-gate and approval flags without executing any work."""
+        updates = []
+        values = []
+        if stage_gate_passed is not None:
+            updates.append("stage_gate_passed = ?")
+            values.append(int(stage_gate_passed))
+        if operator_approved is not None:
+            updates.append("operator_approved = ?")
+            values.append(int(operator_approved))
+        if stage_gate is not None:
+            updates.append("stage_gate_json = ?")
+            values.append(json.dumps(stage_gate))
+        if not updates:
+            return self.get_mission(mission_id) is not None
+
+        values.append(mission_id)
+        cur = self.conn.execute(
+            f"UPDATE missions SET {', '.join(updates)} WHERE id = ?",
+            values,
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def approve_mission(self, mission_id: str) -> bool:
+        """Record operator approval for later exploit-planning unlock checks."""
+        return self.update_mission_control(
+            mission_id,
+            operator_approved=True,
+        )
+
+    def get_approval_status(self, mission_id: str) -> Optional[dict]:
+        mission = self.get_mission(mission_id)
+        if not mission:
+            return None
+
+        stage_gate = {}
+        raw_gate = mission.get("stage_gate_json")
+        if raw_gate:
+            try:
+                stage_gate = json.loads(raw_gate)
+            except json.JSONDecodeError:
+                stage_gate = {}
+
+        stage_gate_passed = bool(mission.get("stage_gate_passed"))
+        operator_approved = bool(mission.get("operator_approved"))
+        requires_operator = bool(stage_gate.get("requires_operator_approval", True))
+        exploit_planning_approved = (
+            stage_gate_passed and (operator_approved or not requires_operator)
+        )
+
+        return {
+            "mission_id": mission_id,
+            "target": mission.get("target", ""),
+            "stage_gate_passed": stage_gate_passed,
+            "operator_approved": operator_approved,
+            "exploit_planning_approved": exploit_planning_approved,
+            "requires_operator_approval": requires_operator,
+            "stage_gate": stage_gate,
+        }
 
     def log_action(self, tool: str, params: dict, output: str, mission_id: str,
                    agent: str = "", duration_ms: int = 0, success: bool = True) -> None:

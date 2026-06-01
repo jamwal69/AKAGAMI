@@ -181,7 +181,7 @@ class OsintAgent(BaseAgent):
         from reconforge.parsers.theharvester_parser import TheHarvesterParser
         parser = TheHarvesterParser()
         # Try JSON parsing first (theHarvester supports JSON output)
-        findings = parser.parse(output, mission_id, self.name)
+        findings = parser.parse(output, mission_id, self.name, target=target)
         if findings:
             return findings
         # Fallback: parse plain text output with regex
@@ -194,9 +194,14 @@ class OsintAgent(BaseAgent):
         seen = set()
 
         # Extract emails: anything@domain.tld
+        from reconforge.parsers.theharvester_parser import (
+            should_keep_theharvester_email,
+            value_matches_target_scope,
+        )
+
         for email in re.findall(r'[\w.+-]+@[\w.-]+\.\w{2,}', output):
             email = email.lower().strip()
-            if email not in seen:
+            if should_keep_theharvester_email(email, target) and email not in seen:
                 seen.add(email)
                 findings.append(OsintFinding(
                     source_agent=self.name, source_tool="theharvester",
@@ -208,7 +213,11 @@ class OsintAgent(BaseAgent):
         target_escaped = re.escape(target)
         for sub in re.findall(rf'([\w.-]+\.{target_escaped})', output):
             sub = sub.lower().strip()
-            if sub not in seen and not sub.startswith("*."):
+            if (
+                sub not in seen
+                and not sub.startswith("*.")
+                and value_matches_target_scope(sub, target)
+            ):
                 seen.add(sub)
                 findings.append(Subdomain(
                     source_agent=self.name, source_tool="theharvester",

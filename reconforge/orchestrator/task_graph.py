@@ -241,7 +241,7 @@ class TaskCoordinationGraph:
                  depends_on=["httpx_probe"],
                  priority=2, opsec_risk="low"),
             Task(id="dir_fuzz_ffuf", agent_type="recon", tool="ffuf",
-                 params={"target": target,
+                 params={"url": target if target.startswith("http") else f"http://{target}",
                          "wordlist": "/usr/share/wordlists/dirb/common.txt"},
                  depends_on=["httpx_probe", "tech_fingerprint"],
                  priority=2, opsec_risk="medium"),

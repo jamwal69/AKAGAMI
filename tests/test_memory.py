@@ -1,7 +1,7 @@
 """Tests for Memory system."""
 
 import pytest
-from reconforge.intel.models import OsintFinding
+from reconforge.intel.models import GateResult, OsintFinding
 from reconforge.memory.working import WorkingMemory
 from reconforge.memory.episodic import EpisodicMemory
 
@@ -82,3 +82,45 @@ class TestEpisodicMemory:
         ctx = episodic_memory.get_resume_context("test-6")
         assert ctx["mission"] is not None
         assert len(ctx["recent_actions"]) == 1
+
+    def test_approval_status_defaults_to_safe_values(self, episodic_memory):
+        episodic_memory.create_mission("test-7", "test.com")
+
+        status = episodic_memory.get_approval_status("test-7")
+
+        assert status["stage_gate_passed"] is False
+        assert status["operator_approved"] is False
+        assert status["exploit_planning_approved"] is False
+
+    def test_approve_mission_sets_operator_approval_only(self, episodic_memory):
+        episodic_memory.create_mission("test-8", "test.com")
+
+        assert episodic_memory.approve_mission("test-8") is True
+        status = episodic_memory.get_approval_status("test-8")
+
+        assert status["operator_approved"] is True
+        assert status["stage_gate_passed"] is False
+        assert status["exploit_planning_approved"] is False
+
+    def test_exploit_planning_approved_requires_gate_and_operator(self, episodic_memory):
+        gate = GateResult(
+            passed=True,
+            confidence=0.9,
+            reason="coverage sufficient",
+            requires_operator_approval=True,
+        )
+        episodic_memory.create_mission("test-9", "test.com")
+        episodic_memory.update_mission_control(
+            "test-9",
+            stage_gate_passed=True,
+            stage_gate=gate.model_dump(),
+        )
+        assert episodic_memory.get_approval_status("test-9")[
+            "exploit_planning_approved"
+        ] is False
+
+        episodic_memory.approve_mission("test-9")
+
+        assert episodic_memory.get_approval_status("test-9")[
+            "exploit_planning_approved"
+        ] is True

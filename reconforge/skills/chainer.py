@@ -39,7 +39,7 @@ Output strictly according to the provided JSON schema."""
 class AttackPathChainer:
     """Skill to deduce attack paths from P4/Info findings."""
 
-    def __init__(self, router: LLMRouter, semantic: Optional[SemanticMemory] = None) -> None:
+    def __init__(self, router: Optional[LLMRouter], semantic: Optional[SemanticMemory] = None) -> None:
         self.router = router
         self.semantic = semantic
 
@@ -57,6 +57,10 @@ class AttackPathChainer:
                 chainable.append(f)
 
         if len(chainable) < 2:
+            return None
+
+        if not self.router:
+            logger.debug("AttackPathChainer skipped: LLM disabled")
             return None
 
         findings_json = [json.loads(f.model_dump_json(exclude={"mission_id"})) for f in chainable]

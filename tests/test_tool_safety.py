@@ -9,6 +9,7 @@ from reconforge.intel.models import MissionState, OutOfScopeError, ToolExecution
 from reconforge.memory.episodic import EpisodicMemory
 from reconforge.tools.bus import ToolBus
 from reconforge.tools.executor import ToolExecutor
+from reconforge.tools.scope import validate_target
 from reconforge.utils.sanitizer import redact_sensitive_output
 
 
@@ -72,6 +73,38 @@ def test_malformed_punycode_does_not_crash(tmp_path):
     mission = MissionState(scope=["example.com"])
     with pytest.raises(OutOfScopeError):
         make_bus(tmp_path)._assert_in_scope({"target": "http://\ud800.com"}, mission)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "example.com;id",
+        "../../../etc/passwd",
+        "example.com\nid",
+        "`id`",
+    ],
+)
+def test_cli_target_validation_rejects_unsafe_values(target):
+    with pytest.raises(ValueError):
+        validate_target(target)
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ("example.com", "example.com"),
+        ("https://example.com", "https://example.com"),
+    ],
+)
+def test_cli_target_validation_accepts_normal_targets(target, expected):
+    assert validate_target(target) == expected
+
+
+def test_cli_target_validation_localhost_requires_explicit_policy():
+    with pytest.raises(ValueError):
+        validate_target("http://127.0.0.1:1")
+
+    assert validate_target("http://127.0.0.1:1", allow_local=True) == "http://127.0.0.1:1"
 
 
 def test_empty_target_denied_for_scoped_tool(tmp_path):

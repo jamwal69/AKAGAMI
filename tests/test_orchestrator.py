@@ -18,8 +18,10 @@ from reconforge.intel.models import (
     WebPath,
 )
 from reconforge.agents.exploit_planner import ExploitPlannerAgent
+from reconforge.orchestrator import master as master_module
 from reconforge.orchestrator.master import MAX_TASK_RETRIES, MasterOrchestrator
 from reconforge.orchestrator.task_graph import TaskCoordinationGraph
+from reconforge.skills.critic import CriticAgent
 
 
 class TestTaskGraph:
@@ -282,6 +284,54 @@ class TestMasterOrchestratorScheduling:
         assert retained[0].verified is False
         assert retained[0].confidence == 0.55
         assert orch.task_graph.tasks["t1"].status == TaskStatus.COMPLETE
+        orch.event_bus.publish.assert_not_awaited()
+
+    def test_no_llm_critic_quarantines_batch_and_warns_once(self, monkeypatch):
+        orch = self.make_orchestrator(active=False)
+        task = Task(id="t1", agent_type="osint", tool="whois",
+                    params={"target": "example.com"}, opsec_risk="passive")
+        findings = [
+            OsintFinding(
+                source_agent="osint",
+                source_tool="whois",
+                confidence=0.8,
+                mission_id=orch.mission.mission_id,
+                category="whois",
+                value=f"example-{i}.com",
+                context="registrant data",
+            )
+            for i in range(3)
+        ]
+        warnings = []
+        monkeypatch.setattr(
+            master_module.logger,
+            "warning",
+            lambda message: warnings.append(str(message)),
+        )
+
+        orch.task_graph.load([task])
+        orch._register_task_fingerprints([task])
+        orch.agents = {"osint": MagicMock()}
+        orch.agents["osint"].run = AsyncMock(return_value=findings)
+        orch.critic = CriticAgent(router=None)
+
+        self.run(orch._execute_task(task))
+
+        retained = orch.intel.store.call_args.args[0]
+        assert len(retained) == len(findings)
+        assert all(finding.verified is False for finding in retained)
+        assert all(finding.confidence == pytest.approx(0.55) for finding in retained)
+        critic_warnings = [
+            message for message in warnings
+            if message.startswith("Critic unavailable in no-LLM mode;")
+        ]
+        assert critic_warnings == [
+            "Critic unavailable in no-LLM mode; quarantined 3 findings unverified."
+        ]
+        assert not any(
+            message.startswith("Finding quarantined:")
+            for message in warnings
+        )
         orch.event_bus.publish.assert_not_awaited()
 
     def test_approved_vulnerabilities_are_enriched_and_scored_before_storage(self):
@@ -564,3 +614,36 @@ class TestMasterOrchestratorScheduling:
             assert ExploitPlannerAgent.is_locked() is False
         finally:
             ExploitPlannerAgent.LOCKED = original
+
+    def test_mission_control_sync_loads_cli_operator_approval(self):
+        orch = self.make_orchestrator(active=True)
+        orch.mission.stage_gate_passed = False
+        orch.mission.operator_approved = False
+        orch.episodic.get_approval_status.return_value = {
+            "stage_gate_passed": True,
+            "operator_approved": True,
+        }
+
+        orch._sync_mission_control_from_store()
+
+        assert orch.mission.stage_gate_passed is True
+        assert orch.mission.operator_approved is True
+
+    def test_mission_control_persist_stores_gate_and_operator_flags(self):
+        orch = self.make_orchestrator(active=True)
+        orch.mission.operator_approved = True
+        gate = GateResult(
+            passed=True,
+            confidence=0.9,
+            reason="coverage sufficient",
+            requires_operator_approval=True,
+        )
+
+        orch._persist_mission_control(gate)
+
+        orch.episodic.update_mission_control.assert_called_once_with(
+            orch.mission.mission_id,
+            stage_gate_passed=True,
+            operator_approved=True,
+            stage_gate=gate.model_dump(),
+        )

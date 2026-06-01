@@ -99,6 +99,35 @@ class TestMcpBridge:
             orch.episodic.close()
             orch.intel.close()
 
+    def test_orchestrator_no_llm_config_does_not_initialize_providers(self, tmp_path, monkeypatch):
+        from reconforge.llm import router as router_module
+
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-nim")
+        monkeypatch.setenv("GROQ_API_KEY", "test-groq")
+        monkeypatch.setattr(
+            router_module,
+            "NvidiaProvider",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("NIM initialized")),
+        )
+        monkeypatch.setattr(
+            router_module,
+            "GroqProvider",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Groq initialized")),
+        )
+        mission = MissionState(target="example.com", scope=["example.com"])
+
+        orch = MasterOrchestrator(
+            mission,
+            {"_db_path": str(tmp_path / "mission.db"), "_no_llm": True},
+        )
+        try:
+            assert orch.router is None
+            assert orch.critic.router is None
+            assert orch.stage_gate.router is None
+        finally:
+            orch.episodic.close()
+            orch.intel.close()
+
     def test_stats_tracking(self):
         asyncio.get_event_loop().run_until_complete(
             self.bridge.call("shodan", {"target": "1.2.3.4"}))

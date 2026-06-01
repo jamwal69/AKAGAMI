@@ -16,6 +16,7 @@ ROUTING TABLE:
   self_correction       → Groq  (fast error analysis + retry)
 """
 import os
+import re
 from typing import Optional
 
 from reconforge.llm.providers.nvidia_nim import NvidiaProvider
@@ -28,6 +29,7 @@ logger = get_logger("llm.router")
 DEFAULT_NIM_MODEL = "deepseek-ai/deepseek-v4-flash"
 DEFAULT_GROQ_FAST_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_GROQ_REASONING_MODEL = "deepseek-r1-distill-llama-70b"
+NO_LLM_ENV = "AKAGAMI_NO_LLM"
 
 # Maps task_type → (primary_provider, fallback_provider)
 ROUTING_TABLE: dict[str, tuple[str, str]] = {
@@ -58,25 +60,49 @@ class LLMRouter:
             max_tokens=1024)
     """
 
-    def __init__(self) -> None:
+    _offline_warnings_emitted: set[str] = set()
+    _placeholder_warnings_emitted: set[str] = set()
+
+    def __init__(
+        self,
+        enabled: bool | None = None,
+        disabled_reason: str = "",
+    ) -> None:
         self._nim: Optional[NvidiaProvider] = None
         self._groq: Optional[GroqProvider] = None
         self._fallback = FallbackHandler()
+        self._offline_reason = ""
+
+        env_disabled = llm_disabled_by_env()
+        if enabled is False or env_disabled:
+            if disabled_reason:
+                self._offline_reason = disabled_reason
+            elif env_disabled:
+                self._offline_reason = f"{NO_LLM_ENV}=1"
+            else:
+                self._offline_reason = "--no-llm requested"
+            self._log_offline_mode()
+            return
+
         self._init_providers()
+        if not self.is_available():
+            self._offline_reason = "no LLM API keys configured"
+            self._log_offline_mode()
 
     def _init_providers(self) -> None:
-        nim_key = os.getenv("NVIDIA_NIM_API_KEY", "")
+        ignored_placeholders: list[str] = []
+        nim_key = self._api_key_from_env("NVIDIA_NIM_API_KEY", ignored_placeholders)
         nim_model = os.getenv("NVIDIA_NIM_MODEL", DEFAULT_NIM_MODEL)
-        groq_key = os.getenv("GROQ_API_KEY", "")
+        groq_key = self._api_key_from_env("GROQ_API_KEY", ignored_placeholders)
         groq_model_fast = os.getenv("GROQ_MODEL_FAST", DEFAULT_GROQ_FAST_MODEL)
         groq_model_reasoning = os.getenv("GROQ_MODEL_REASONING",
                                          DEFAULT_GROQ_REASONING_MODEL)
 
+        self._log_placeholder_keys(ignored_placeholders)
+
         if nim_key:
             self._nim = NvidiaProvider(api_key=nim_key, model=nim_model)
             logger.debug(f"NIM provider initialized: {nim_model}")
-        else:
-            logger.warning("NVIDIA_NIM_API_KEY not set — NIM provider disabled")
 
         if groq_key:
             self._groq = GroqProvider(
@@ -84,8 +110,34 @@ class LLMRouter:
                 model_fast=groq_model_fast,
                 model_reasoning=groq_model_reasoning)
             logger.debug(f"Groq provider initialized: fast={groq_model_fast}")
-        else:
-            logger.warning("GROQ_API_KEY not set — Groq provider disabled")
+
+    def _api_key_from_env(self, name: str, ignored_placeholders: list[str]) -> str:
+        value = os.getenv(name, "").strip()
+        if is_placeholder_api_key(value):
+            ignored_placeholders.append(name)
+            return ""
+        return value
+
+    def _log_placeholder_keys(self, names: list[str]) -> None:
+        fresh = [name for name in names
+                 if name not in self._placeholder_warnings_emitted]
+        if not fresh:
+            return
+        self._placeholder_warnings_emitted.update(fresh)
+        logger.warning(
+            "Ignoring placeholder LLM API key(s): "
+            f"{', '.join(sorted(fresh))}"
+        )
+
+    def _log_offline_mode(self) -> None:
+        reason = self._offline_reason or "disabled"
+        if reason in self._offline_warnings_emitted:
+            return
+        self._offline_warnings_emitted.add(reason)
+        logger.warning(
+            f"LLM disabled ({reason}); using deterministic parsers and "
+            "heuristic fallbacks only"
+        )
 
     async def call(self, task_type: str, system: str,
                    messages: list[dict], max_tokens: int = 2048,
@@ -95,6 +147,12 @@ class LLMRouter:
         Returns response text string.
         Raises LLMUnavailableError only if ALL providers fail.
         """
+        if not self.is_available():
+            raise LLMUnavailableError(
+                f"LLM disabled ({self._offline_reason or 'unavailable'}); "
+                "using offline/no-LLM mode"
+            )
+
         primary_name, fallback_name = ROUTING_TABLE.get(
             task_type, ROUTING_TABLE["default"])
 
@@ -124,12 +182,40 @@ class LLMRouter:
     def is_available(self) -> bool:
         return self._nim is not None or self._groq is not None
 
+    def offline_reason(self) -> str:
+        return self._offline_reason
+
     def status(self) -> dict:
         return {
             "nim_available": self._nim is not None,
             "groq_available": self._groq is not None,
+            "offline_mode": not self.is_available(),
+            "offline_reason": self._offline_reason,
             "nim_model": self._nim.model if self._nim else os.getenv(
                 "NVIDIA_NIM_MODEL", "not set"),
             "groq_model_fast": self._groq.model_fast if self._groq else os.getenv(
                 "GROQ_MODEL_FAST", "not set"),
         }
+
+
+def llm_disabled_by_env(env: dict[str, str] | None = None) -> bool:
+    source = os.environ if env is None else env
+    value = str(source.get(NO_LLM_ENV, "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def is_placeholder_api_key(value: str) -> bool:
+    """Detect documented example keys without rejecting normal test strings."""
+    normalized = value.strip().strip("'\"").lower()
+    if not normalized:
+        return False
+    return bool(
+        re.fullmatch(r"nvapi[-_]x{4,}", normalized)
+        or re.fullmatch(r"gsk[-_]x{4,}", normalized)
+        or normalized in {
+            "nvapi-<key>",
+            "nvapi_<key>",
+            "gsk_<key>",
+            "gsk-<key>",
+        }
+    )

@@ -485,6 +485,30 @@ class TestStageGate:
         assert metrics["total_ports"] == 1
         assert metrics["average_confidence"] > 0
 
+    def test_gate_osint_failure_distinguishes_findings_from_categories(self):
+        mid = self.mission.mission_id
+        self.store.write(OsintFinding(
+            source_agent="t", source_tool="w", confidence=0.8,
+            mission_id=mid, category="whois",
+            value="one.test", context="test"))
+        self.store.write(OsintFinding(
+            source_agent="t", source_tool="w", confidence=0.8,
+            mission_id=mid, category="whois",
+            value="two.test", context="test"))
+
+        summary = self.store.get_attack_surface_summary(mid)
+        data = self.store.export_json(mid)
+        metrics = self.gate._compute_metrics(summary, data)
+        passed, failures = self.gate._check_quantitative(metrics)
+
+        assert passed is False
+        assert metrics["osint_findings"] == 2
+        assert metrics["osint_categories"] == 1
+        assert any(
+            "covered 1 categories from 2 OSINT findings" in failure
+            for failure in failures
+        )
+
     def test_custom_thresholds(self):
         gate = StageGate(client=None, thresholds={"min_hosts_verified": 5})
         self.store.write(Host(

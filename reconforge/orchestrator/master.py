@@ -14,7 +14,7 @@ import json
 from typing import Optional
 from pathlib import Path
 
-from reconforge.llm.router import LLMRouter
+from reconforge.llm.router import LLMRouter, llm_disabled_by_env
 from dotenv import load_dotenv
 
 from reconforge.agents.base import BaseAgent
@@ -135,7 +135,12 @@ class MasterOrchestrator:
         self.intel = IntelStore(effective_db)
         self.executor = ToolExecutor(config.get("tools_config", "config/tools.yaml"))
         self._tool_registry = self.executor.tools_config.get("tools", {})
-        self.router = LLMRouter()
+        no_llm = bool(config.get("_no_llm")) or llm_disabled_by_env()
+        router = LLMRouter(
+            enabled=not no_llm,
+            disabled_reason="--no-llm requested" if config.get("_no_llm") else "",
+        )
+        self.router = router if router.is_available() else None
         self.mcp_bridge = McpBridge(router=self.router)
         self.tool_bus = ToolBus(
             self.executor, self.episodic, self.sanitizer,
@@ -228,7 +233,10 @@ class MasterOrchestrator:
         # Register mission in episodic memory
         self.episodic.create_mission(
             self.mission.mission_id, self.mission.target,
-            self.config)
+            self.config,
+            stage_gate_passed=self.mission.stage_gate_passed,
+            operator_approved=self.mission.operator_approved)
+        self._sync_mission_control_from_store()
 
         self.event_bus.start()
         self._setup_event_handlers()
@@ -323,6 +331,7 @@ class MasterOrchestrator:
             report_path = None
 
         # Step 6: Complete mission
+        self._persist_mission_control(gate_result)
         self.episodic.complete_mission(self.mission.mission_id)
 
         summary = self.intel.get_attack_surface_summary(self.mission.mission_id)
@@ -474,7 +483,7 @@ class MasterOrchestrator:
 
     def _validate_task_params_and_scope(self, task: Task) -> bool:
         if task.tool in SYNTHETIC_PASSIVE_TOOLS:
-            return True
+            return self._validate_synthetic_task_scope(task)
         canonical_tool = TOOL_ALIASES.get(task.tool, task.tool)
         tool_def = self._tool_registry_for_validation().get(canonical_tool)
         if not tool_def:
@@ -500,6 +509,27 @@ class MasterOrchestrator:
         if not subjects:
             logger.warning(f"Rejecting task {task.id}: no scoped target field")
             return False
+        for subject in subjects:
+            allowed, denied = is_target_in_scope(
+                subject, self.mission.scope, self.mission.out_of_scope)
+            if denied:
+                logger.warning(f"Rejecting task {task.id}: out-of-scope target {subject}")
+                return False
+            if allowed:
+                return True
+        logger.warning(f"Rejecting task {task.id}: target not in scope {subjects}")
+        return False
+
+    def _validate_synthetic_task_scope(self, task: Task) -> bool:
+        target_fields = ["target", "domain", "url", "host", "ip"]
+        subjects = [
+            task.params[field] for field in target_fields
+            if isinstance(task.params.get(field), str) and task.params.get(field).strip()
+        ]
+        if not subjects:
+            logger.warning(f"Rejecting task {task.id}: no scoped target field")
+            return False
+        from reconforge.tools.scope import is_target_in_scope
         for subject in subjects:
             allowed, denied = is_target_in_scope(
                 subject, self.mission.scope, self.mission.out_of_scope)
@@ -734,6 +764,9 @@ class MasterOrchestrator:
 
     async def _plan_mission(self) -> list[Task]:
         """Claude plans the full task graph for the current stage."""
+        if not self.router:
+            logger.info("LLM planner disabled; using default plan")
+            return self._default_plan()
         prompt = self._build_planning_prompt()
         try:
             text = await self.router.call(
@@ -812,6 +845,7 @@ class MasterOrchestrator:
             return []
             
         approved = []
+        critic_unavailable_quarantines = 0
         try:
             reviews = await self.critic.review_batch(findings)
             for finding, review in reviews:
@@ -825,7 +859,10 @@ class MasterOrchestrator:
                     improved = type(finding)(**finding_data)
                     approved.append(improved)
                 elif review.verdict == ReviewVerdict.QUARANTINE:
-                    logger.warning(f"Finding quarantined: {review.reason}")
+                    if str(review.reason).startswith("Critic unavailable;"):
+                        critic_unavailable_quarantines += 1
+                    else:
+                        logger.warning(f"Finding quarantined: {review.reason}")
                     finding_data = finding.model_dump()
                     if review.improved_finding:
                         finding_data.update(review.improved_finding)
@@ -833,6 +870,11 @@ class MasterOrchestrator:
                     approved.append(type(finding)(**finding_data))
                 else:
                     logger.debug(f"Finding rejected: {review.reason}")
+            if critic_unavailable_quarantines:
+                logger.warning(
+                    "Critic unavailable in no-LLM mode; quarantined "
+                    f"{critic_unavailable_quarantines} findings unverified."
+                )
         except Exception as e:
             logger.warning(f"Critic batch review failed; no findings approved: {e}")
         return approved
@@ -932,6 +974,33 @@ class MasterOrchestrator:
             return False
         ExploitPlannerAgent.unlock()
         return True
+
+    def _sync_mission_control_from_store(self) -> None:
+        """Load approval flags persisted by CLI commands before gate decisions."""
+        try:
+            status = self.episodic.get_approval_status(self.mission.mission_id)
+        except Exception as e:
+            logger.warning(f"Mission control sync failed: {e}")
+            return
+        if not status:
+            return
+        self.mission.operator_approved = (
+            self.mission.operator_approved or status["operator_approved"]
+        )
+        self.mission.stage_gate_passed = (
+            self.mission.stage_gate_passed or status["stage_gate_passed"]
+        )
+
+    def _persist_mission_control(self, gate_result) -> None:
+        try:
+            self.episodic.update_mission_control(
+                self.mission.mission_id,
+                stage_gate_passed=bool(gate_result.passed),
+                operator_approved=bool(self.mission.operator_approved),
+                stage_gate=gate_result.model_dump(),
+            )
+        except Exception as e:
+            logger.warning(f"Mission control persistence failed: {e}")
 
     def cleanup(self) -> None:
         """Close database connections and ingest knowledge."""
