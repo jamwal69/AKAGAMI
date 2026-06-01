@@ -69,6 +69,7 @@ def test_runtime_package_data_is_declared():
     package_data = _project_metadata()["tool"]["setuptools"]["package-data"]["reconforge"]
 
     assert "config/*.yaml" in package_data
+    assert "assets/brand/*.png" in package_data
     assert "report/templates/*.j2" in package_data
 
 
@@ -93,3 +94,12 @@ def test_packaged_report_template_resource_is_loadable():
 
     assert resource.is_file()
     assert "executive_summary" in resource.read_text(encoding="utf-8")
+
+
+def test_packaged_brand_asset_resources_are_loadable():
+    brand_root = files("reconforge.assets.brand")
+
+    for filename in ("akagami-logo.png", "akagami-mark.png"):
+        resource = brand_root.joinpath(filename)
+        assert resource.is_file()
+        assert resource.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")

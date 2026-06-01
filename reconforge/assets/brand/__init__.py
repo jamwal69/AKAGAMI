@@ -1,0 +1,2 @@
+"""Packaged AKAGAMI brand assets."""
+

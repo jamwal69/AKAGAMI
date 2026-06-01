@@ -47,5 +47,6 @@ include-package-data = true
 [tool.setuptools.package-data]
 reconforge = [
     "config/*.yaml",
+    "assets/brand/*.png",
     "report/templates/*.j2",
 ]

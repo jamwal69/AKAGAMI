@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip setuptools wheel build
+
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+      - name: Compile Python sources
+        run: python -m compileall reconforge tests
+
+      - name: Build distribution
+        run: python -m build --no-isolation --outdir /tmp/reconforge-build
+
+      - name: Smoke test wheel
+        run: |
+          set -euo pipefail
+
+          wheel="$(python - <<'PY'
+          from pathlib import Path
+
+          wheels = sorted(Path("/tmp/reconforge-build").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"Expected one wheel, found {len(wheels)}")
+          print(wheels[0])
+          PY
+          )"
+          smoke_venv="$(mktemp -d)"
+          python -m venv "$smoke_venv"
+          "$smoke_venv/bin/python" -m pip install --upgrade pip
+          "$smoke_venv/bin/python" -m pip install "$wheel"
+          "$smoke_venv/bin/akagami" --help
+          cd "$smoke_venv"
+          "$smoke_venv/bin/python" - <<'PY'
+          from importlib.resources import files
+
+          import reconforge
+
+          config = files("reconforge.config").joinpath("tools.yaml")
+          template = files("reconforge.report.templates").joinpath("recon_report.md.j2")
+
+          assert reconforge.__name__ == "reconforge"
+          assert config.is_file(), "packaged tool config is not loadable"
+          assert "tools:" in config.read_text(encoding="utf-8")
+          assert template.is_file(), "packaged report template is not loadable"
+          assert "executive_summary" in template.read_text(encoding="utf-8")
+          PY
+
+      - name: Check diff whitespace
+        run: git diff --check

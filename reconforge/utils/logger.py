@@ -9,6 +9,7 @@ Log levels:
 """
 
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -28,10 +29,11 @@ RECONFORGE_THEME = Theme({
     "finding": "bold cyan",
 })
 
-console = Console(theme=RECONFORGE_THEME)
+console = Console(theme=RECONFORGE_THEME, no_color=bool(os.environ.get("NO_COLOR")))
 
 # Global registry of loggers
 _loggers: dict[str, logging.Logger] = {}
+_global_level = logging.INFO
 
 
 def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
@@ -53,7 +55,7 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     if level:
         logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     else:
-        logger.setLevel(logging.INFO)
+        logger.setLevel(_global_level)
 
     # Only add handler if none exist (prevent duplicate handlers)
     if not logger.handlers:
@@ -77,7 +79,9 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
 
 def set_global_level(level: str) -> None:
     """Set log level for all ReconForge loggers."""
+    global _global_level
     log_level = getattr(logging, level.upper(), logging.INFO)
+    _global_level = log_level
     for logger in _loggers.values():
         logger.setLevel(log_level)
 
