@@ -1,8 +1,34 @@
-# Akagami V2
+# AKAGAMI
 
-Akagami is a Python 3.11+ reconnaissance automation tool for authorized security testing and bug bounty work. It coordinates OSINT collection, active recon, scanner output parsing, endpoint inventory, CVE enrichment, memory/storage, and Markdown reporting.
+<p align="center">
+  <strong>Scoped, opsec-aware bug bounty reconnaissance command deck.</strong>
+</p>
 
-It is not a guaranteed bug-finding system. Passing tests and clean scanner output do not prove that a target is vulnerable or safe. Real HackerOne-style use still requires scope review, manual validation, and human judgment.
+<p align="center">
+  <a href="https://github.com/jamwal69/AKAGAMI/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jamwal69/AKAGAMI/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Python 3.11 | 3.12" src="https://img.shields.io/badge/python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white">
+  <img alt="Tests: 436 passing" src="https://img.shields.io/badge/tests-436%20passing-brightgreen">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-orange">
+</p>
+
+<p align="center">
+  <img src="assets/brand/akagami-report-header.png" alt="AKAGAMI report header" width="760">
+</p>
+
+AKAGAMI is a scoped, opsec-aware bug bounty reconnaissance command deck with multi-agent orchestration, dry-run planning, endpoint intelligence, safety gates, and report generation.
+
+It helps authorized security operators validate scope, inspect local tooling, plan passive or active reconnaissance, organize endpoint intelligence, and generate Markdown reports from stored mission data. It is not a guaranteed bug-finding system; scanner output and passing tests still require human validation.
+
+Quick demo:
+
+```bash
+akagami recon -t example.com -C Example --passive-only --dry-run
+```
+
+Safety notice: use AKAGAMI only on assets you own or are explicitly authorized to test. Confirm program scope before every mission, especially before enabling active scans, authenticated testing, watcher-triggered missions, or exploit planning.
+
+For setup and smoke-test commands, see [docs/quickstart.md](docs/quickstart.md).
 
 ## Capability Status Matrix
 

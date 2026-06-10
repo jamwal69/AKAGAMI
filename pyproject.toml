@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "akagami"
 version = "2.0.0"
-description = "Akagami — Professional-grade multi-agent reconnaissance engine"
+description = "Scoped bug bounty recon command deck with multi-agent orchestration, endpoint inventory, safety gates, and report generation."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-    {name = "Rohan"},
+    {name = "Manav Jamwal"},
 ]
 
 dependencies = [
